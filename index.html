@@ -1,37 +1,29 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Statistics Homework</title>
+  <link rel="stylesheet" href="assets/style.css">
   <style>
-    :root { --bg:#fafaf7; --fg:#1d1d1b; --muted:#6b6b66; --line:#e2e1da; --accent:#2f5d8a; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg:#151514; --fg:#ecebe6; --muted:#9a9993; --line:#2c2c2a; --accent:#8db8e3; }
-    }
-    * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:var(--fg);
-           font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
-    main { max-width: 720px; margin: 0 auto; padding: 56px 16px; }
-    h1 { font-size: 2rem; margin: 0 0 4px; letter-spacing: -0.02em; }
-    .sub { color: var(--muted); margin: 0 0 40px; }
-    ol { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
-    li { border-bottom: 1px solid var(--line); padding: 16px 0; display:flex; gap:16px; align-items:baseline; }
-    .n { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 2.5em; }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .empty { color: var(--muted); font-style: italic; }
-    footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+    ol.hw { list-style: none; padding: 0; margin: 24px 0 0; border-top: 1px solid var(--line); }
+    ol.hw li { border-bottom: 1px solid var(--line); padding: 18px 0; display: flex; gap: 18px; }
+    ol.hw .n { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 700; min-width: 2em; }
+    ol.hw a { font-weight: 600; font-size: 1.05rem; }
+    ol.hw p { margin: 4px 0 0; color: var(--fg2); font-size: .95rem; }
   </style>
 </head>
 <body>
   <main>
     <h1>Statistics Homework</h1>
-    <p class="sub">Luiggi — raccolta degli homework di statistica</p>
-    <ol>
-      <li><span class="n">01</span><span class="empty">In arrivo</span></li>
+    <p class="sub">Luiggi · interactive solutions, running entirely in the browser</p>
+    <ol class="hw">
+      <li><span class="n">01</span><div><a href="hw1/">Private key → public key on an elliptic curve</a>
+        <p>Toy curve y² = x³ + 7 (mod 17), point addition, step-by-step animation of Q = kG, the same algorithm on secp256k1, and a statistical study of the outputs (distributions, bits, correlation, avalanche).</p></div></li>
+      <li><span class="n">02</span><div><a href="hw2/">From wallet seed to Ethereum address</a>
+        <p>BIP-39, BIP-32, BIP-44, secp256k1, Keccak-256 and EIP-55 in a live pipeline; key generation vs derivation, hashing, checksums, encoding; history, SHA-2 vs SHA-3 vs Keccak, and statistical experiments.</p></div></li>
     </ol>
-    <footer>Pubblicato con GitHub Pages</footer>
+    <footer>Published with GitHub Pages · <a href="https://github.com/luiggi404/Statistics-homework">source</a></footer>
   </main>
 </body>
 </html>

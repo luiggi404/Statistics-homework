@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HW1 · Private key to public key</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  #plot svg { width: 100%; max-width: 560px; height: auto; display: block; margin: 0 auto; }
+  #explain { min-height: 4.5em; font-size: .92rem; }
+  #explain .mono { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  .k-badge { font-weight: 700; color: var(--s1); }
+</style>
+</head>
+<body>
+<main>
+<p class="crumb"><a href="../">Statistics Homework</a> / HW1</p>
+<h1>HW1 — Private key → public key with elliptic-curve scalar multiplication</h1>
+<p class="sub">A toy version of what Ethereum does on secp256k1: from a private number <i>k</i> to a public point <i>Q = kG</i>, plus a statistical look at the outputs.</p>
+
+<div class="def"><b>What this page is about.</b> A public key in Ethereum is a point on an elliptic curve obtained by "multiplying" a fixed base point <i>G</i> by the private key <i>k</i>. Computing <i>Q = kG</i> is fast; going back from <i>Q</i> to <i>k</i> (the Elliptic Curve Discrete Logarithm Problem, ECDLP) is believed to be infeasible on real curves. That asymmetry is what makes it a one-way function.</div>
+
+<h2>1. The toy curve</h2>
+<div class="def"><b>Definition.</b> An elliptic curve over a prime field 𝔽<sub>p</sub> is the set of pairs (x, y) with 0 ≤ x, y &lt; p satisfying y² ≡ x³ + ax + b (mod p), together with an extra "point at infinity" 𝒪 that acts as the zero of the group.</div>
+<p>Ethereum uses <b>secp256k1</b>: <code>y² = x³ + 7</code> over a 256-bit prime. Here we keep the same equation (a = 0, b = 7) but use a tiny prime so every point can be drawn and checked by hand. With the homework values <code>p = 17</code>, <code>G = (1, 5)</code>, <code>k = 6</code>:</p>
+<ul>
+  <li>Check G is on the curve: 5² = 25 ≡ 8 and 1³ + 7 = 8 ✓.</li>
+  <li>The curve has <b>17 affine points + 𝒪 = 18 points</b>. Since 17 ≡ 2 (mod 3), the curve y² = x³ + 7 is supersingular and always has exactly p + 1 points.</li>
+  <li><b>G = (1, 5) has order 9</b>: 9G = 𝒪, so G only generates a subgroup of 9 elements (8 points + 𝒪). Private keys are therefore meaningful only modulo 9.</li>
+</ul>
+
+<h3>Point addition rules</h3>
+<p>For P = (x₁, y₁), Q = (x₂, y₂), all operations mod p (division means multiplying by the modular inverse):</p>
+<pre>P + O = P  and  O + Q = Q            (O = point at infinity)
+if x1 = x2 and y1 = -y2:  P + Q = O  (vertical line)
+if P != Q:  λ = (y2 - y1) / (x2 - x1)        (chord)
+if P == Q:  λ = (3·x1² + a) / (2·y1)         (tangent, "doubling")
+x3 = λ² - x1 - x2
+y3 = λ·(x1 - x3) - y1                 →  P + Q = (x3, y3)</pre>
+<p class="note">Geometrically: the line through P and Q meets the curve in a third point −R; reflecting it (y → −y) gives R = P + Q. Over 𝔽<sub>p</sub> the "line" wraps around modulo p, which is exactly what the animation below draws.</p>
+
+<h2>2. Interactive computation of Q = kG</h2>
+<div class="panel">
+  <div class="controls">
+    <label>Prime p
+      <select id="p"><option value="17" selected>17 (homework)</option><option value="23">23</option><option value="59">59</option><option value="97">97</option></select>
+    </label>
+    <label>Base point G <select id="g"></select></label>
+    <label>Private key k <input id="k" type="number" min="1" value="6"></label>
+    <label>Method
+      <select id="method"><option value="naive">Repeated addition (G, 2G, …, kG)</option><option value="dbl">Double-and-add (fast)</option></select>
+    </label>
+  </div>
+  <div class="controls" style="margin-top:12px">
+    <button id="play">▶ Play</button>
+    <button id="step" class="ghost">Step</button>
+    <button id="all" class="ghost">Show all</button>
+    <button id="reset" class="ghost">Reset</button>
+    <label style="flex-direction:row;align-items:center;gap:8px">Speed <input id="speed" type="range" min="150" max="1600" value="700" style="direction:rtl;width:120px"></label>
+  </div>
+  <p id="info" class="note" style="margin:10px 0 0"></p>
+</div>
+
+<div id="plot"></div>
+<div class="legend" style="margin:4px 0 8px">
+  <span style="--c:var(--muted)">curve point</span>
+  <span style="--c:var(--s1)">multiples of G reached so far</span>
+  <span style="--c:var(--s2)">current operands / wrapped line</span>
+</div>
+<div id="explain" class="panel"></div>
+
+<p class="result">TOY PUBLIC KEY: Q = <span id="qout" class="mono"></span></p>
+
+<h3>Computation log</h3>
+<div class="scroll"><table id="log"><thead><tr><th>#</th><th>Operation</th><th class="num" style="text-transform:none">λ</th><th>Result</th></tr></thead><tbody></tbody></table></div>
+<p class="note"><b>Repeated addition</b> needs k − 1 additions, which is hopeless for a 256-bit key. <b>Double-and-add</b> reads the bits of k from the most significant one: for each bit it doubles the running point and, if the bit is 1, adds G. It needs about log₂k doublings and at most as many additions (≈ 256 + 128 on average for Ethereum keys).</p>
+
+<h2>3. Same algorithm, real curve (secp256k1)</h2>
+<p>The code below is the same double-and-add, run with JavaScript <code>BigInt</code> on the real Ethereum parameters. Try <code>k = 1</code> (you get G itself) or <code>k = 2</code>, whose x-coordinate is the well-known <code>c6047f94…709ee5</code>.</p>
+<div class="panel">
+  <div class="controls">
+    <label style="flex:1">Private key k (decimal or 0x-hex) <input id="bigk" value="6" style="width:100%"></label>
+    <button id="bigrun">Compute kG</button>
+  </div>
+  <p style="margin:12px 0 2px" class="note">Q.x</p><div id="bigx" class="big"></div>
+  <p style="margin:8px 0 2px" class="note">Q.y</p><div id="bigy" class="big"></div>
+  <p id="bigstats" class="note" style="margin-top:8px"></p>
+</div>
+<p class="note">secp256k1: p = 2²⁵⁶ − 2³² − 977, group order n ≈ 1.158·10⁷⁷ (prime). The best known generic attack (Pollard's rho) needs about √n ≈ 2¹²⁸ group operations, which is why recovering k is infeasible.</p>
+
+<h2>4. Statistical exploration</h2>
+<p>We now repeat the experiment for <b>every</b> private key k = 1, …, ord(G) − 1 and look at the resulting public keys as data. On p = 17 the sample is tiny (8 points), so the larger primes below give more meaningful pictures. 1669 and 2503 were chosen because their curves have <i>prime</i> order (1663 and 2557 points), like secp256k1, so every point except 𝒪 is a generator.</p>
+<div class="panel controls">
+  <label>Curve
+    <select id="sp"><option value="17">p = 17 (homework)</option><option value="97">p = 97</option><option value="1669" selected>p = 1669 (prime order 1663)</option><option value="2503">p = 2503 (prime order 2557)</option></select>
+  </label>
+  <label>Base point <select id="sg"></select></label>
+  <span id="sinfo" class="note"></span>
+</div>
+
+<h3>4.1 Distribution and frequency of x and y</h3>
+<div id="cx"></div>
+<div id="cy"></div>
+<div id="cmult"></div>
+<p id="tmult" class="note"></p>
+
+<h3>4.2 Distribution of bits</h3>
+<div id="cbits"></div>
+<p id="tbits" class="note"></p>
+
+<h3>4.3 Correlation between input and output</h3>
+<div id="ckx"></div><div id="cxx"></div>
+<p id="tcorr" class="note"></p>
+
+<h3>4.4 Avalanche-like behaviour</h3>
+<div id="cav"></div>
+<p id="tav" class="note"></p>
+
+<h3>4.5 Algebraic structure (what a hash would never show)</h3>
+<p id="tstruct"></p>
+
+<h3>All public keys for this base point</h3>
+<div class="scroll"><table id="alltab"><thead><tr><th class="num">k</th><th class="num">x</th><th class="num">y</th></tr></thead><tbody></tbody></table></div>
+
+<h2>5. Discussion — one-way function vs. hash function</h2>
+<div class="def"><b>Two different promises.</b> A <i>one-way function</i> only promises: easy to compute, hard to invert. A <i>cryptographic hash function</i> promises much more: arbitrary-length input → fixed-length output that behaves like random bits (uniform bits, avalanche, no exploitable structure), plus preimage, second-preimage and collision resistance.</div>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th>Property observed</th><th>What we saw</th><th>Meaningful for EC scalar multiplication?</th><th>Typical of hash functions?</th></tr></thead>
+  <tbody>
+    <tr><td>Determinism</td><td>Same k always gives same Q.</td><td class="yes">Yes — essential</td><td class="yes">Yes</td></tr>
+    <tr><td>Easy forward / hard backward</td><td>Forward is a few hundred operations; inverse on the toy curves is trivial by brute force, on secp256k1 ≈ 2¹²⁸ work.</td><td class="yes">Yes — the defining property (ECDLP)</td><td class="yes">Yes (preimage resistance)</td></tr>
+    <tr><td>Uniformity over the group</td><td>For k uniform in [1, n−1], Q is uniform over the n−1 points (k ↦ kG is a bijection). Each valid x appears exactly twice.</td><td class="yes">Yes — the public key alone reveals nothing about which k was used</td><td>Different notion: hashes aim at uniform <i>bit strings</i></td></tr>
+    <tr><td>Uniform x / y over [0, p)</td><td>No: about half of the x values never occur (x³ + 7 must be a square), and the result is "too regular" (exact multiplicity 2, not random sampling).</td><td>Not required — public keys are curve points, not random strings</td><td class="yes">Yes — expected of a hash</td></tr>
+    <tr><td>Balanced bits (≈ 50 % ones)</td><td>Low bits ≈ 0.5, but the top bit is biased because p is not a power of 2.</td><td>Not required — Ethereum anyway hashes the public key with Keccak-256 to get a short, fixed-size address</td><td class="yes">Yes</td></tr>
+    <tr><td>No correlation input ↔ output</td><td>Pearson r between k and x(kG) ≈ 0; consecutive outputs also uncorrelated.</td><td class="yes">Yes, necessary in the weak sense: a visible correlation would leak k. But r ≈ 0 does not prove hardness.</td><td class="yes">Yes</td></tr>
+    <tr><td>Avalanche (1 input bit → ~50 % output bits)</td><td>EC output changes a lot, but the distribution is wider and less centred than SHA-256's.</td><td>Not a design goal</td><td class="yes">Yes — a core design criterion (strict avalanche criterion)</td></tr>
+    <tr><td>Collisions</td><td>None: on [1, n−1] the map is injective.</td><td>Injectivity is by construction (group structure)</td><td>Hashes must make collisions <i>hard to find</i>, although they necessarily exist</td></tr>
+    <tr><td>Algebraic structure</td><td>(a + b)G = aG + bG and (n − k)G = −kG.</td><td class="yes">Yes — required! ECDSA signatures and ECDH key exchange rely on it</td><td class="no">Must not exist — a hash should look like a random oracle</td></tr>
+  </tbody>
+</table>
+</div>
+<p><b>Conclusion.</b> The statistics that matter for a public-key one-way function are those tied to inversion: determinism, uniformity of Q over the group, and absence of any statistical shortcut from Q back to k. Bit balance, uniformity over all bit strings, avalanche, and "no structure" are properties of hash functions; elliptic-curve scalar multiplication intentionally <i>has</i> structure, and its security comes from the size of the group, not from looking random. Finally, passing simple statistical tests is never proof of one-wayness: the toy curves pass several of them and are still broken instantly by brute force.</p>
+
+<footer><a href="../">← All homework</a> · <a href="../hw2/">HW2 →</a></footer>
+</main>
+
+<script src="../assets/charts.js"></script>
+<script>
+// ---------- finite-field elliptic curve arithmetic (Number, small p) ----------
+const B = 7;
+const mod = (a, m) => ((a % m) + m) % m;
+function inv(a, m) {               // extended Euclid
+  let r0 = mod(a, m), r1 = m, s0 = 1, s1 = 0;
+  while (r1) { const q = Math.floor(r0 / r1); [r0, r1] = [r1, r0 - q * r1]; [s0, s1] = [s1, s0 - q * s1]; }
+  return mod(s0, m);
+}
+function ecAdd(p, P, Q) {
+  if (!P) return { R: Q, type: "id" };
+  if (!Q) return { R: P, type: "id" };
+  if (P[0] === Q[0] && mod(P[1] + Q[1], p) === 0) return { R: null, type: "vertical" };
+  let lam, type, num, den;
+  if (P[0] === Q[0] && P[1] === Q[1]) { num = mod(3 * P[0] * P[0], p); den = mod(2 * P[1], p); type = "double"; }
+  else { num = mod(Q[1] - P[1], p); den = mod(Q[0] - P[0], p); type = "add"; }
+  lam = mod(num * inv(den, p), p);
+  const x3 = mod(lam * lam - P[0] - Q[0], p), y3 = mod(lam * (P[0] - x3) - P[1], p);
+  return { R: [x3, y3], type, lam, num, den, dinv: inv(den, p), neg: [x3, mod(-y3, p)] };
+}
+function curvePoints(p) {
+  const roots = new Map();
+  for (let y = 0; y < p; y++) { const s = (y * y) % p; if (!roots.has(s)) roots.set(s, []); roots.get(s).push(y); }
+  const pts = [];
+  for (let x = 0; x < p; x++) for (const y of roots.get(((x * x) % p * x + B) % p) || []) pts.push([x, y]);
+  return pts;
+}
+function orderOf(p, G) { let R = G, n = 1; while (R) { R = ecAdd(p, R, G).R; n++; } return n; }
+const fmtP = (P) => (P ? `(${P[0]}, ${P[1]})` : "𝒪");
+const key = (P) => (P ? P[0] + "," + P[1] : "O");
+
+// ---------- interactive part ----------
+const $ = (s) => document.querySelector(s);
+let S = {}; // state
+
+function fillBasePoints(sel, p, preferred) {
+  const pts = curvePoints(p);
+  sel.innerHTML = "";
+  pts.forEach((P) => {
+    const o = document.createElement("option");
+    o.value = key(P); o.textContent = `${fmtP(P)} · order ${orderOf(p, P)}`;
+    sel.appendChild(o);
+  });
+  if (preferred && pts.some((P) => key(P) === preferred)) sel.value = preferred;
+  else { // pick the point with the largest order
+    let best = pts[0], bo = 0;
+    pts.forEach((P) => { const o = orderOf(p, P); if (o > bo) { bo = o; best = P; } });
+    sel.value = key(best);
+  }
+  return pts;
+}
+const parsePt = (v) => v.split(",").map(Number);
+
+function buildSteps(p, G, k, method) {
+  const steps = [];
+  if (method === "naive") {
+    steps.push({ label: "1G", m: 1, R: G, op: null, text: "Start: 1G = G" });
+    let R = G;
+    for (let i = 2; i <= k; i++) {
+      const a = ecAdd(p, R, G);
+      steps.push({ label: i + "G", m: i, P: R, Q: G, a, R: a.R, text: `${i}G = ${i - 1}G + G` });
+      R = a.R;
+    }
+  } else {
+    const bits = k.toString(2);
+    let R = G, m = 1;
+    steps.push({ label: "1G", m: 1, R: G, op: null, text: `Start with the leading bit of k = ${bits}₂: R = G`, bit: 0 });
+    for (let i = 1; i < bits.length; i++) {
+      const d = ecAdd(p, R, R);
+      steps.push({ label: 2 * m + "G", m: 2 * m, P: R, Q: R, a: d, R: d.R, text: `bit ${i} (${bits[i]}): double ${m}G → ${2 * m}G`, bit: i });
+      R = d.R; m *= 2;
+      if (bits[i] === "1") {
+        const s = ecAdd(p, R, G);
+        steps.push({ label: m + 1 + "G", m: m + 1, P: R, Q: G, a: s, R: s.R, text: `bit ${i} is 1: add G → ${m + 1}G`, bit: i });
+        R = s.R; m += 1;
+      }
+    }
+  }
+  return steps;
+}
+
+function setup() {
+  const p = +$("#p").value;
+  const pts = S.p === p ? S.pts : fillBasePoints($("#g"), p, p === 17 ? "1,5" : null);
+  const G = parsePt($("#g").value);
+  let k = Math.max(1, Math.floor(+$("#k").value || 1));
+  const kMax = $("#method").value === "naive" ? 200 : 100000;
+  if (k > kMax) { k = kMax; $("#k").value = k; }
+  const ord = orderOf(p, G);
+  S = { p, pts, G, k, ord, steps: buildSteps(p, G, k, $("#method").value), i: 0, phase: 3, timer: null };
+  $("#info").innerHTML = `Curve y² = x³ + 7 over 𝔽<sub>${p}</sub>: ${pts.length} points + 𝒪 = ${pts.length + 1}. ` +
+    `G = ${fmtP(G)} has order ${ord}, so kG = (k mod ${ord})G. ` +
+    ($("#method").value === "naive" ? `Repeated addition: ${k - 1} additions.` : `Double-and-add: k = ${k.toString(2)}₂, ${S.steps.length - 1} group operations.`);
+  const final = S.steps[S.steps.length - 1].R;
+  $("#qout").textContent = fmtP(final) + (final ? "" : "  (k is a multiple of the order of G)");
+  // log table
+  const tb = $("#log tbody"); tb.innerHTML = "";
+  S.steps.forEach((s, i) => {
+    const tr = document.createElement("tr");
+    const lam = s.a && s.a.lam != null ? s.a.lam : "—";
+    tr.innerHTML = `<td class="num">${i}</td><td>${s.text}</td><td class="num">${lam}</td><td class="mono">${s.label} = ${fmtP(s.R)}</td>`;
+    tb.appendChild(tr);
+  });
+  stop(); S.i = 0; S.phase = 3; render();
+}
+
+// frames: each op step has phases 0 (operands) 1 (line) 2 (third point) 3 (result)
+function advance() {
+  const s = S.steps[S.i];
+  if (S.phase < 3 && s.a) { S.phase++; }
+  else if (S.i < S.steps.length - 1) { S.i++; S.phase = S.steps[S.i].a ? 0 : 3; }
+  else { stop(); return false; }
+  render(); return true;
+}
+function stop() { if (S.timer) clearInterval(S.timer); S.timer = null; $("#play").textContent = "▶ Play"; }
+function play() {
+  if (S.timer) return stop();
+  if (S.i === S.steps.length - 1 && S.phase === 3) { S.i = 0; S.phase = 3; }
+  $("#play").textContent = "❚❚ Pause";
+  S.timer = setInterval(() => { if (!advance()) stop(); }, +$("#speed").value);
+}
+
+function render() {
+  const { p, pts, steps } = S, s = steps[S.i];
+  const W = 560, pad = 34, cell = (W - 2 * pad) / (p - 1 || 1);
+  const X = (x) => pad + x * cell, Y = (y) => W - pad - y * cell;
+  const r = Math.max(2.2, Math.min(7, cell * 0.32));
+  let svg = `<svg viewBox="0 0 ${W} ${W}" role="img" aria-label="Points of the curve and the multiples of G">`;
+  // light grid + axis ticks
+  const tickEvery = p <= 23 ? 1 : p <= 59 ? 5 : 10;
+  for (let v = 0; v < p; v += tickEvery) {
+    svg += `<line x1="${X(v)}" y1="${Y(0)}" x2="${X(v)}" y2="${Y(p - 1)}" stroke="var(--line)" stroke-width="1"/>`;
+    svg += `<line x1="${X(0)}" y1="${Y(v)}" x2="${X(p - 1)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1"/>`;
+    svg += `<text x="${X(v)}" y="${W - pad + 16}" font-size="10" text-anchor="middle" fill="var(--fg2)">${v}</text>`;
+    svg += `<text x="${pad - 8}" y="${Y(v) + 3}" font-size="10" text-anchor="end" fill="var(--fg2)">${v}</text>`;
+  }
+  // all curve points
+  pts.forEach((P) => (svg += `<circle cx="${X(P[0])}" cy="${Y(P[1])}" r="${r * 0.7}" fill="var(--muted)" fill-opacity=".55"/>`));
+  // visited points up to current step (result shown only at phase 3)
+  const visited = new Map();
+  for (let i = 0; i <= S.i; i++) { if (i === S.i && S.phase < 3) break; if (steps[i].R) visited.set(key(steps[i].R), steps[i].label); }
+  // wrapped line / operands for current step
+  if (s.a && S.phase < 3) {
+    const { P, Q, a } = s;
+    if (S.phase >= 1) {
+      if (a.type === "vertical") {
+        svg += `<line x1="${X(P[0])}" y1="${Y(0)}" x2="${X(P[0])}" y2="${Y(p - 1)}" stroke="var(--s2)" stroke-width="2" stroke-dasharray="6 4"/>`;
+      } else {
+        for (let x = 0; x < p; x++) {
+          const y = mod(a.lam * (x - P[0]) + P[1], p);
+          svg += `<circle cx="${X(x)}" cy="${Y(y)}" r="${r * 0.45}" fill="var(--s2)" fill-opacity=".55"/>`;
+        }
+      }
+    }
+    if (S.phase >= 2 && a.R) {
+      svg += `<circle cx="${X(a.neg[0])}" cy="${Y(a.neg[1])}" r="${r * 1.2}" fill="none" stroke="var(--s2)" stroke-width="2"/>`;
+      svg += `<text x="${X(a.neg[0]) + r + 4}" y="${Y(a.neg[1]) - r}" font-size="11" fill="var(--s2)" font-weight="600">−R</text>`;
+      svg += `<line x1="${X(a.neg[0])}" y1="${Y(a.neg[1])}" x2="${X(a.R[0])}" y2="${Y(a.R[1])}" stroke="var(--s2)" stroke-width="1.5" stroke-dasharray="3 3"/>`;
+    }
+    [P, Q].forEach((T) => (svg += `<circle cx="${X(T[0])}" cy="${Y(T[1])}" r="${r * 1.35}" fill="none" stroke="var(--s2)" stroke-width="2.5"/>`));
+  }
+  visited.forEach((lab, kk) => {
+    const [x, y] = kk.split(",").map(Number);
+    svg += `<circle cx="${X(x)}" cy="${Y(y)}" r="${r}" fill="var(--s1)" stroke="var(--bg)" stroke-width="2"/>`;
+    if (p <= 59) svg += `<text x="${X(x) + r + 3}" y="${Y(y) + 4}" font-size="${p <= 23 ? 12 : 10}" font-weight="600" fill="var(--fg)">${lab}</text>`;
+  });
+  svg += `</svg>`;
+  $("#plot").innerHTML = svg;
+
+  // explanation text
+  let h = `<b>Step ${S.i} / ${steps.length - 1}</b> — ${s.text}<br>`;
+  if (s.a) {
+    const { P, Q, a } = s, p_ = S.p;
+    if (a.type === "vertical") {
+      h += `P = ${fmtP(P)} and Q = ${fmtP(Q)} have the same x and opposite y: the line is vertical, so ${s.label} = <b>𝒪</b> (point at infinity).`;
+    } else {
+      const f = a.type === "double"
+        ? `λ = 3x₁² · (2y₁)⁻¹ = ${a.num} · ${a.den}⁻¹ = ${a.num} · ${a.dinv} ≡ <b>${a.lam}</b> (mod ${p_})`
+        : `λ = (y₂ − y₁) · (x₂ − x₁)⁻¹ = ${a.num} · ${a.den}⁻¹ = ${a.num} · ${a.dinv} ≡ <b>${a.lam}</b> (mod ${p_})`;
+      const phases = [
+        `Operands: P = ${fmtP(P)}${a.type === "double" ? " (doubling, P = Q)" : ", Q = " + fmtP(Q)}.`,
+        `${a.type === "double" ? "Tangent" : "Line"} through them, wrapped mod ${p_}: <span class="mono">${f}</span>`,
+        `It meets the curve again at −R = ${fmtP(a.neg)} (x₃ = λ² − x₁ − x₂ = ${a.R[0]}).`,
+        `Reflect: R = (x₃, −y₃) → <b>${s.label} = ${fmtP(a.R)}</b>`,
+      ];
+      h += phases.slice(0, S.phase + 1).join("<br>");
+    }
+  } else h += `<b>${s.label} = ${fmtP(s.R)}</b>`;
+  $("#explain").innerHTML = h;
+  document.querySelectorAll("#log tbody tr").forEach((tr, i) => tr.classList.toggle("active", i === S.i));
+  const act = document.querySelector("#log tr.active"); if (act && S.timer) act.scrollIntoView({ block: "nearest" });
+}
+
+$("#p").onchange = () => { S.p = null; setup(); };
+["#g", "#k", "#method"].forEach((s) => ($(s).onchange = setup));
+$("#play").onclick = play;
+$("#step").onclick = () => { stop(); advance(); };
+$("#reset").onclick = () => { stop(); S.i = 0; S.phase = 3; render(); };
+$("#all").onclick = () => { stop(); S.i = S.steps.length - 1; S.phase = 3; render(); };
+$("#speed").oninput = () => { if (S.timer) { stop(); play(); } };
+setup();
+
+// ---------- secp256k1 with BigInt ----------
+const P256 = 2n ** 256n - 2n ** 32n - 977n;
+const N256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
+const G256 = [0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798n, 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8n];
+const bmod = (a, m) => ((a % m) + m) % m;
+function bpow(b, e, m) { let r = 1n; b = bmod(b, m); while (e > 0n) { if (e & 1n) r = (r * b) % m; b = (b * b) % m; e >>= 1n; } return r; }
+function bAdd(P, Q) {
+  if (!P) return Q; if (!Q) return P;
+  if (P[0] === Q[0] && bmod(P[1] + Q[1], P256) === 0n) return null;
+  const lam = P[0] === Q[0] && P[1] === Q[1]
+    ? bmod(3n * P[0] * P[0] * bpow(2n * P[1], P256 - 2n, P256), P256)
+    : bmod((Q[1] - P[1]) * bpow(Q[0] - P[0], P256 - 2n, P256), P256);
+  const x3 = bmod(lam * lam - P[0] - Q[0], P256);
+  return [x3, bmod(lam * (P[0] - x3) - P[1], P256)];
+}
+function runBig() {
+  let k;
+  try { k = BigInt($("#bigk").value.trim()); } catch { $("#bigstats").textContent = "Invalid number."; return; }
+  k = bmod(k, N256);
+  if (k === 0n) { $("#bigx").textContent = "𝒪"; $("#bigy").textContent = ""; $("#bigstats").textContent = "k ≡ 0 (mod n) is not a valid private key."; return; }
+  let R = null, dbl = 0, add = 0;
+  const t0 = performance.now();
+  for (const b of k.toString(2)) { if (R) { R = bAdd(R, R); dbl++; } if (b === "1") { R = bAdd(R, G256); add++; } }
+  const ms = performance.now() - t0;
+  $("#bigx").textContent = R[0].toString(16).padStart(64, "0");
+  $("#bigy").textContent = R[1].toString(16).padStart(64, "0");
+  $("#bigstats").textContent = `${k.toString(2).length}-bit key · ${dbl} doublings + ${add} additions · ${ms.toFixed(1)} ms in your browser.`;
+}
+$("#bigrun").onclick = runBig; runBig();
+
+// ---------- statistics ----------
+const bitlen = (v) => (v <= 0 ? 1 : Math.floor(Math.log2(v)) + 1);
+const popcount = (v) => { let c = 0; while (v) { v &= v - 1; c++; } return c; };
+const pearson = (a, b) => {
+  const n = a.length, ma = a.reduce((s, v) => s + v, 0) / n, mb = b.reduce((s, v) => s + v, 0) / n;
+  let sab = 0, saa = 0, sbb = 0;
+  for (let i = 0; i < n; i++) { const da = a[i] - ma, db = b[i] - mb; sab += da * db; saa += da * da; sbb += db * db; }
+  return sab / Math.sqrt(saa * sbb);
+};
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let shaCache = new Map();
+async function sha256Int(k) {
+  if (shaCache.has(k)) return shaCache.get(k);
+  const buf = new Uint8Array([(k >>> 24) & 255, (k >>> 16) & 255, (k >>> 8) & 255, k & 255]);
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
+  shaCache.set(k, h); return h;
+}
+const hamBytes = (a, b) => { let c = 0; for (let i = 0; i < a.length; i++) c += popcount(a[i] ^ b[i]); return c; };
+
+function histogram(values, lo, hi, bins) {
+  const w = (hi - lo) / bins, c = new Array(bins).fill(0);
+  values.forEach((v) => c[Math.min(bins - 1, Math.floor((v - lo) / w))]++);
+  return { counts: c, w };
+}
+
+async function runStats() {
+  const p = +$("#sp").value;
+  const G = parsePt($("#sg").value);
+  const ord = orderOf(p, G);
+  const Q = [null]; let R = null;
+  for (let k = 1; k < ord; k++) { R = ecAdd(p, R, G).R; Q.push(R); }
+  const ks = [], xs = [], ys = [];
+  for (let k = 1; k < ord; k++) { ks.push(k); xs.push(Q[k][0]); ys.push(Q[k][1]); }
+  const N = ks.length, L = bitlen(p - 1);
+  $("#sinfo").innerHTML = `ord(G) = ${ord} → ${N} public keys (k = 1 … ${ord - 1}); coordinates need ${L} bits.`;
+
+  // 4.1 x, y histograms
+  const s1 = css("--s1"), s2 = css("--s2");
+  const perValue = p <= 100;
+  const bins = perValue ? p : 60;
+  const hx = histogram(xs, 0, p, bins), hy = histogram(ys, 0, p, bins);
+  const labs = hx.counts.map((_, i) => (perValue ? String(i) : String(Math.round(i * hx.w))));
+  const tipLab = (i) => (perValue ? `value ${i}` : `[${Math.round(i * hx.w)}, ${Math.round((i + 1) * hx.w) - 1}]`);
+  const ideal = (N / p) * (perValue ? 1 : hx.w);
+  barChart($("#cx"), { title: "x-coordinate of Q = kG", caption: perValue ? "Frequency of each individual value 0 … p−1" : `Counts in ${bins} bins of width ≈ ${hx.w.toFixed(1)}`, labels: labs, tip: tipLab, series: [{ name: "x", values: hx.counts, color: s1 }], ref: ideal, refLabel: "uniform on [0,p)", xLabel: "x", yLabel: "count" });
+  barChart($("#cy"), { title: "y-coordinate of Q = kG", caption: perValue ? "Frequency of each individual value 0 … p−1" : `Counts in ${bins} bins`, labels: labs, tip: tipLab, series: [{ name: "y", values: hy.counts, color: s1 }], ref: ideal, refLabel: "uniform on [0,p)", xLabel: "y", yLabel: "count" });
+  // multiplicity of individual x values
+  const fx = new Array(p).fill(0); xs.forEach((x) => fx[x]++);
+  const fy = new Array(p).fill(0); ys.forEach((y) => fy[y]++);
+  const maxm = Math.max(...fx, ...fy, 2);
+  const mx = new Array(maxm + 1).fill(0), my = new Array(maxm + 1).fill(0);
+  fx.forEach((c) => mx[c]++); fy.forEach((c) => my[c]++);
+  barChart($("#cmult"), { title: "How often does each individual value occur?", caption: "Number of values (out of p) that occur 0, 1, 2, … times among the public keys", labels: mx.map((_, i) => i + "×"), series: [{ name: "x values", values: mx, color: s1 }, { name: "y values", values: my, color: s2 }], height: 190, xLabel: "occurrences", yLabel: "# of values" });
+  // compare with a truly random sample of the same size: expected Poisson-like spread
+  const lamb = N / p;
+  const pois = (j) => Math.exp(-lamb) * Math.pow(lamb, j) / [1, 1, 2, 6, 24, 120][j];
+  $("#tmult").innerHTML = `x: <b>${mx[0]}</b> of ${p} values never occur, <b>${mx[2] || 0}</b> occur exactly twice${mx[1] ? `, ${mx[1]} once` : ""}. ` +
+    `This is pure structure, not chance: Q and −Q = (x, p−y) share the same x, and x is only possible when x³+7 is a square mod p. ` +
+    `If the ${N} x-values were drawn independently and uniformly, we would expect about ${Math.round(p * pois(0))} values with 0 occurrences, ${Math.round(p * pois(1))} with 1, ${Math.round(p * pois(2))} with 2 and ${Math.round(p * (1 - pois(0) - pois(1) - pois(2)))} with 3 or more. ` +
+    `y: ${my.map((c, i) => (c ? `${c} values occur ${i}×` : "")).filter(Boolean).join(", ")}. ` +
+    (p % 3 === 1
+      ? `Since p ≡ 1 (mod 3), x ↦ ωx (ω a cube root of unity) maps the curve to itself and keeps y, so y-values come in groups of three.`
+      : `Since p ≡ 2 (mod 3), x³ = y² − 7 has exactly one solution for every y, so each y can occur at most once.`);
+
+  // 4.2 bits
+  const obs = [], exp = [], blabs = [];
+  for (let j = L - 1; j >= 0; j--) {
+    let c = 0; xs.forEach((x) => (c += (x >> j) & 1));
+    let e = 0; for (let v = 0; v < p; v++) e += (v >> j) & 1;
+    obs.push(c / N); exp.push(e / p); blabs.push("b" + j);
+  }
+  barChart($("#cbits"), { title: "Fraction of 1-bits per bit position of x", caption: `Bit b${L - 1} is the most significant. Dashed line = 0.5 (ideal for a hash).`, labels: blabs, series: [{ name: "observed in x(kG)", values: obs, color: s1 }, { name: "uniform on [0, p)", values: exp, color: s2 }], ref: 0.5, refLabel: "0.5", yMax: 1, yFmt: (v) => v.toFixed(2), height: 210 });
+  let ones = 0; xs.forEach((x) => (ones += popcount(x))); ys.forEach((y) => (ones += popcount(y)));
+  $("#tbits").innerHTML = `Overall fraction of 1-bits in (x, y): <b>${(ones / (2 * N * L)).toFixed(3)}</b>. ` +
+    `The top bit sits at ${obs[0].toFixed(2)} instead of 0.5 simply because p = ${p} is not a power of two (values ≥ 2<sup>${L - 1}</sup> are rarer). ` +
+    `Lower bits are close to 0.5. For secp256k1, p is within 2<sup>33</sup> of 2<sup>256</sup>, so this bias is negligible there, but the coordinates are still not arbitrary bit strings (the pair must satisfy the curve equation).`;
+
+  // 4.3 correlation
+  const kx = ks.map((k, i) => [k, xs[i]]);
+  const xx = []; for (let i = 0; i + 1 < N; i++) xx.push([xs[i], xs[i + 1]]);
+  scatterChart($("#ckx"), { title: "Private key k vs x(kG)", points: kx, xMax: ord, yMax: p, xLabel: "k", yLabel: "x", tip: (q) => `k=${q[0]} → x=${q[1]}` });
+  scatterChart($("#cxx"), { title: "x(kG) vs x((k+1)G)", points: xx, xMax: p, yMax: p, xLabel: "x(kG)", yLabel: "x((k+1)G)", color: s2, tip: (q) => `${q[0]} → ${q[1]}` });
+  const r3 = (v) => (Math.abs(v) < 0.0005 ? "0.000" : v.toFixed(3));
+  const rkx = r3(pearson(ks, xs)), rky = r3(pearson(ks, ys)), rxx = r3(pearson(xx.map((a) => a[0]), xx.map((a) => a[1])));
+  $("#tcorr").innerHTML = `Pearson correlation: r(k, x) = <b>${rkx}</b>, r(k, y) = <b>${rky}</b>, r(x<sub>k</sub>, x<sub>k+1</sub>) = <b>${rxx}</b>` +
+    ` (for comparison, |r| &lt; ${(2 / Math.sqrt(N)).toFixed(3)} is within ≈ 2 standard errors of zero for N = ${N}). ` +
+    `No linear relationship is visible: knowing x does not tell you whether k is small or large. ` +
+    `Note that the scatter k vs x is symmetric around k = ord/2, because x((n−k)G) = x(kG): a perfectly deterministic pattern that a correlation coefficient cannot detect.`;
+
+  // 4.4 avalanche: flip one bit of k
+  const Lk = bitlen(ord - 1);
+  const ecc = [], sha = [];
+  for (const k of ks) {
+    const hk = await sha256Int(k);
+    for (let j = 0; j < Lk; j++) {
+      const k2raw = k ^ (1 << j); const k2 = k2raw % ord;
+      if (k2 !== 0) {
+        const A = Q[k], Bq = Q[k2];
+        ecc.push((popcount(A[0] ^ Bq[0]) + popcount(A[1] ^ Bq[1])) / (2 * L));
+      }
+      sha.push(hamBytes(hk, await sha256Int(k2raw)) / 256);
+    }
+  }
+  const hb = 20, he = histogram(ecc, 0, 1.0000001, hb).counts.map((c) => c / ecc.length), hs = histogram(sha, 0, 1.0000001, hb).counts.map((c) => c / sha.length);
+  barChart($("#cav"), { title: "Flip one bit of k: fraction of output bits that change", caption: `EC output = x‖y (${2 * L} bits) vs SHA-256(k) (256 bits); bins of 5 %, share of trials`, labels: he.map((_, i) => i * 5 + "%"), tip: (i) => `${i * 5}–${i * 5 + 5}%`, series: [{ name: "kG (x‖y)", values: he, color: s1 }, { name: "SHA-256(k)", values: hs, color: s2 }], yMax: Math.max(0.6, Math.ceil(Math.max(...he, ...hs) / 0.15) * 0.15), yFmt: (v) => (v * 100).toFixed(0) + "%", xLabel: "share of output bits flipped" });
+  const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length, sd = (a) => { const m = mean(a); return Math.sqrt(mean(a.map((v) => (v - m) ** 2))); };
+  $("#tav").innerHTML = `Mean share of flipped bits: kG <b>${(mean(ecc) * 100).toFixed(1)} %</b> (sd ${(sd(ecc) * 100).toFixed(1)}), SHA-256 <b>${(mean(sha) * 100).toFixed(1)} %</b> (sd ${(sd(sha) * 100).toFixed(1)}), over ${sha.length} single-bit flips. ` +
+    `Both are near 50 %, so a small change in k gives an unrelated-looking public key. SHA-256 is far more concentrated around 50 % (its output is long and it is designed for the strict avalanche criterion); ` +
+    `the toy EC outputs are short and coordinates are restricted to [0, p), so the spread is wider. For EC this is a by-product of the group structure, not a design goal.`;
+
+  // 4.5 structure
+  const rnd = (m) => 1 + Math.floor(Math.random() * (m - 1));
+  const a = rnd(ord), b = rnd(ord), sum = (a + b) % ord;
+  const lhs = sum ? Q[sum] : null, rhs = ecAdd(p, Q[a], Q[b]).R;
+  const k0 = rnd(ord);
+  $("#tstruct").innerHTML = `Homomorphism: with a = ${a}, b = ${b}: (a+b)G = ${fmtP(lhs)} and aG + bG = ${fmtP(rhs)} → ${key(lhs) === key(rhs) ? '<span class="yes">equal</span>' : '<span class="no">different</span>'}. ` +
+    `Negation: ${k0}G = ${fmtP(Q[k0])}, (${ord}−${k0})G = ${fmtP(Q[ord - k0])} — same x, opposite y. ` +
+    `These identities are exactly what makes signatures (ECDSA) and key agreement (ECDH) possible. For SHA-256 no relation between H(a), H(b) and H(a+b) exists; finding one would be considered a break.`;
+
+  const tb = $("#alltab tbody"); tb.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  ks.forEach((k, i) => { const tr = document.createElement("tr"); tr.innerHTML = `<td class="num">${k}</td><td class="num">${xs[i]}</td><td class="num">${ys[i]}</td>`; frag.appendChild(tr); });
+  tb.appendChild(frag);
+}
+function setupStats() {
+  const p = +$("#sp").value;
+  if (p <= 100) fillBasePoints($("#sg"), p, p === 17 ? "1,5" : null);
+  else { // prime order: every point is a generator; list a few
+    const pts = curvePoints(p).slice(0, 40);
+    $("#sg").innerHTML = pts.map((P) => `<option value="${key(P)}">${fmtP(P)}</option>`).join("");
+  }
+  runStats();
+}
+$("#sp").onchange = setupStats; $("#sg").onchange = runStats;
+setupStats();
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", runStats);
+</script>
+</body>
+</html>

@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HW2 · From seed to address</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .tag { display:inline-block; font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:1px 7px; border-radius:99px; margin-left:6px; vertical-align:1px; border:1px solid currentColor; }
+  .t-gen { color:#008300 } .t-enc { color:#6b6b66 } .t-chk { color:#c97a00 } .t-kdf { color:#6250d6 } .t-pk { color:var(--s1) } .t-hash { color:var(--s2) }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .t-kdf { color:#9085e9 } :root:not([data-theme="light"]) .t-chk { color:#e0a030 } :root:not([data-theme="light"]) .t-enc { color:#a8a7a0 } :root:not([data-theme="light"]) .t-gen { color:#3fa63f } }
+  .words { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:6px; margin-top:6px; }
+  .word { border:1px solid var(--line); border-radius:6px; padding:4px 8px; font-size:.8rem; background:var(--bg); }
+  .word b { font-size:.9rem; } .word .mono { color:var(--fg2); font-size:.72rem; }
+  .cs { color:#c97a00; font-weight:700; }
+  .eip { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:1rem; letter-spacing:.02em; word-break:break-all; }
+  .eip .up { color:var(--s2); font-weight:700; } .eip .lo { color:var(--s1); } .eip .dg { color:var(--fg2); }
+  .timeline { border-left:2px solid var(--line); margin:16px 0 16px 8px; padding-left:18px; }
+  .ev { position:relative; margin:0 0 14px; }
+  .ev::before { content:""; position:absolute; left:-25px; top:7px; width:10px; height:10px; border-radius:50%; background:var(--s1); border:2px solid var(--bg); }
+  .ev.ctx::before { background:var(--muted); }
+  .ev .yr { font-weight:700; font-variant-numeric:tabular-nums; margin-right:8px; }
+  .hashout td:last-child { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.78rem; word-break:break-all; }
+  textarea { font: inherit; font-family: ui-monospace, Menlo, Consolas, monospace; font-size:.9rem; width:100%; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px 10px; resize:vertical; }
+</style>
+</head>
+<body>
+<main>
+<p class="crumb"><a href="../">Statistics Homework</a> / HW2</p>
+<h1>HW2 — From wallet seed to Ethereum address</h1>
+<p class="sub">Hashing, key derivation and the other cryptographic primitives behind every Ethereum wallet, with a live pipeline and some statistics.</p>
+
+<div class="def"><b>What this page is about.</b> A wallet such as MetaMask turns a list of 12 words into an address like <code>0xf39F…2266</code>. That journey goes through six standards, and each one does a different kind of job: generating randomness, encoding it, deriving keys, public-key cryptography, hashing, and checksumming.</div>
+
+<h2>1. The pipeline, live</h2>
+<p class="warn"><b>Never type a real recovery phrase on any web page.</b> Everything here runs locally in your browser, but use the test phrase or the "Random" button only.</p>
+<div class="panel">
+  <label class="note" for="mn">Mnemonic (BIP-39)</label>
+  <textarea id="mn" rows="2">test test test test test test test test test test test junk</textarea>
+  <div class="controls" style="margin-top:10px">
+    <label>Passphrase (optional) <input id="pass" type="text" placeholder="empty" style="width:160px"></label>
+    <label>Account index i <input id="idx" type="number" min="0" value="0"></label>
+    <label>Words
+      <select id="nwords"><option>12</option><option>15</option><option>18</option><option>21</option><option>24</option></select>
+    </label>
+    <button id="rand">Random mnemonic</button>
+    <button id="testv" class="ghost">Test vector</button>
+  </div>
+  <p id="mnerr" class="no" style="margin:8px 0 0"></p>
+</div>
+
+<div class="pipeline" id="pipe">
+  <div class="stage"><div class="lbl">Entropy <span class="tag t-gen">key generation</span></div><div class="val" id="v-ent"></div><div class="note" id="v-entn"></div></div>
+  <div class="arrow">↓ <b>BIP-39</b>: append SHA-256 checksum bits, split into 11-bit groups, look up 2048-word list <span class="tag t-enc">encoding</span><span class="tag t-chk">checksum</span></div>
+  <div class="stage"><div class="lbl">Mnemonic words</div><div class="words" id="v-words"></div></div>
+  <div class="arrow">↓ <b>BIP-39</b>: PBKDF2-HMAC-SHA512, 2048 iterations, salt = "mnemonic" + passphrase <span class="tag t-kdf">key derivation (stretching)</span></div>
+  <div class="stage"><div class="lbl">Seed (512 bits)</div><div class="val" id="v-seed"></div></div>
+  <div class="arrow">↓ <b>BIP-32</b>: HMAC-SHA512(key = "Bitcoin seed", seed) → left half = master private key, right half = chain code <span class="tag t-kdf">key derivation</span></div>
+  <div class="stage"><div class="lbl">Master key (m)</div><div class="val" id="v-master"></div></div>
+  <div class="arrow">↓ <b>BIP-32 / BIP-44</b>: child derivation along the path <span class="mono" id="v-pathinline"></span> <span class="tag t-kdf">key derivation</span></div>
+  <div class="stage"><div class="lbl">Private key (256 bits)</div><div class="val" id="v-priv"></div></div>
+  <div class="arrow">↓ <b>secp256k1</b>: Q = k·G (the operation from HW1) <span class="tag t-pk">public-key crypto</span></div>
+  <div class="stage"><div class="lbl">Public key (uncompressed: 04 ‖ X ‖ Y)</div><div class="val" id="v-pub"></div></div>
+  <div class="arrow">↓ <b>Keccak-256</b>(X ‖ Y), keep the last 20 bytes <span class="tag t-hash">hashing</span></div>
+  <div class="stage"><div class="lbl">Keccak-256 digest → address (lower case)</div><div class="val" id="v-kec"></div><div class="val" id="v-addr" style="margin-top:4px"></div></div>
+  <div class="arrow">↓ <b>EIP-55</b>: upper-case letter i if nibble i of Keccak-256(address text) ≥ 8 <span class="tag t-chk">checksum</span><span class="tag t-enc">encoding</span></div>
+  <div class="stage"><div class="lbl">Checksummed address</div><div class="eip" id="v-eip"></div><div class="note" id="v-eipn" style="margin-top:4px"></div></div>
+</div>
+<p class="note">With the test phrase (the one Hardhat and Foundry use for local test networks) and index 0 you should get <code>0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266</code>, the well-known first test account. Same phrase, same path → same address in every wallet: that interoperability is the whole point of the BIPs.</p>
+
+<h2>2. The standards and primitives</h2>
+<h3>BIP-39 — mnemonic sentence and seed</h3>
+<div class="def">Turns random bits into words a human can write down, and turns those words into a 512-bit seed.</div>
+<p>The wallet draws 128–256 bits of <b>entropy</b> from a secure random generator. It appends the first ENT/32 bits of SHA-256(entropy) as a <b>checksum</b> (4 bits for 12 words), splits the result into 11-bit chunks, and maps each to one of 2048 words. The words are therefore just an <b>encoding</b> of the entropy plus a checksum. To get the seed, the sentence is fed to <b>PBKDF2-HMAC-SHA512</b> with 2048 iterations and the salt "mnemonic" + optional passphrase. The iterations make brute-forcing phrases slower, and the passphrase acts as a "25th word".</p>
+<h3>BIP-32 — hierarchical deterministic (HD) derivation</h3>
+<div class="def">From one seed, derives a whole tree of key pairs deterministically, so one backup covers every account.</div>
+<p>HMAC-SHA512 of the seed gives the master private key and a chain code. Every child is again HMAC-SHA512(chain code, parent key ‖ index): the left half is added to the parent key (mod n), the right half becomes the child's chain code. <b>Hardened</b> children (index ≥ 2³¹, written with ′) use the parent <i>private</i> key as input. A leaked child key plus the parent xpub therefore cannot reveal the parent. Non-hardened children can be derived from the parent <i>public</i> key alone, which allows watch-only wallets.</p>
+<h3>BIP-44 — standard paths</h3>
+<div class="def">Fixes the meaning of each level of the BIP-32 tree so that different wallets find the same keys.</div>
+<p><code>m / purpose′ / coin_type′ / account′ / change / address_index</code>, with purpose 44 and coin type 60 for Ether (registered in SLIP-44). Most Ethereum wallets use <code>m/44′/60′/0′/0/i</code> and create account <i>i</i> by incrementing the last index. Some, such as Ledger Live, increment the account level instead, which is why the same phrase can show different addresses in different apps.</p>
+<h3>secp256k1 — elliptic-curve public-key cryptography</h3>
+<div class="def">The curve that links the private key to the public key and is used to sign transactions (ECDSA).</div>
+<p>y² = x³ + 7 over a 256-bit prime field, defined by SECG (SEC 2, 2000) and adopted by Bitcoin and then Ethereum. The public key is Q = k·G, exactly the scalar multiplication of HW1, with a group of order ≈ 2²⁵⁶. Signatures prove ownership of k without revealing it, and Ethereum can even recover Q from a signature.</p>
+<h3>Keccak-256 — hashing</h3>
+<div class="def">Compresses the 64-byte public key into a fixed-size digest; the last 20 bytes are the address.</div>
+<p>Keccak is a sponge construction (1600-bit permutation). Ethereum uses it everywhere: addresses, transaction hashes, function selectors, storage slots. Hashing the key makes the address short (20 bytes instead of 64) and hides the public key until the account first signs something.</p>
+<h3>EIP-55 — mixed-case checksum</h3>
+<div class="def">Adds error detection to an address without changing its length or its value.</div>
+<p>Hex is case-insensitive, so the case of the letters a–f is free to carry information. EIP-55 hashes the lower-case hex text with Keccak-256 and upper-cases letter i when the i-th hex digit of that hash is ≥ 8. A wallet that receives a mixed-case address recomputes the pattern and rejects mismatches. All-lowercase addresses are still accepted, just without the check.</p>
+
+<h2>3. Telling the concepts apart</h2>
+<table>
+  <thead><tr><th>Concept</th><th>Meaning</th><th>Where in the pipeline</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag t-gen" style="margin:0">Key generation</span></td><td>Creating new secret material from <b>fresh randomness</b>. Not reproducible; this is the only step that needs a good random source.</td><td>Drawing the BIP-39 entropy</td></tr>
+    <tr><td><span class="tag t-kdf" style="margin:0">Key derivation</span></td><td><b>Deterministically</b> computing new keys from existing secret material. Same input → same keys, which is why a backup works.</td><td>PBKDF2 (mnemonic → seed), BIP-32 HMAC-SHA512 tree, BIP-44 path</td></tr>
+    <tr><td><span class="tag t-pk" style="margin:0">Public-key crypto</span></td><td>A <b>pair</b> of mathematically linked keys: private for signing, public for verifying. One-way (ECDLP).</td><td>secp256k1: private key → public key, ECDSA signatures</td></tr>
+    <tr><td><span class="tag t-hash" style="margin:0">Hashing</span></td><td>Arbitrary input → fixed-size digest that looks random; one-way and collision resistant. Uses no key and has no inverse.</td><td>Keccak-256 (address); also SHA-256 and HMAC-SHA512 inside BIP-39/32</td></tr>
+    <tr><td><span class="tag t-chk" style="margin:0">Checksum</span></td><td>Redundancy added only to <b>detect accidental errors</b> (typos). Gives no secrecy and no protection against an attacker.</td><td>BIP-39 checksum bits (last word), EIP-55 letter case</td></tr>
+    <tr><td><span class="tag t-enc" style="margin:0">Encoding</span></td><td>A reversible change of <b>representation</b>; no secret involved, nothing is computed "one-way".</td><td>Bits → words (BIP-39), bytes → hex, hex → mixed case</td></tr>
+  </tbody>
+</table>
+
+<h2>4. Trying it in real wallets</h2>
+<p>In MetaMask, Rabby, Rainbow or Exodus the "Secret Recovery Phrase" is the BIP-39 mnemonic. "Add account" walks the BIP-44 path by incrementing the last index (<code>…/0/0</code>, <code>…/0/1</code>, …). Importing the test phrase above into any of them on a test network shows the same first address <code>0xf39F…2266</code>. Wallets also display or accept EIP-55 addresses and warn when the case pattern is wrong. Exporting a single account's "private key" gives the 32-byte key from the pipeline, but that key alone cannot regenerate the other accounts, because derivation only goes down the tree, never up.</p>
+
+<h2>5. Historical context</h2>
+<div class="timeline">
+  <div class="ev"><span class="yr">1977</span><b>RSA</b>: the first practical public-key cryptosystem (Rivest, Shamir, Adleman).</div>
+  <div class="ev ctx"><span class="yr">1985</span>Elliptic-curve cryptography proposed independently by Koblitz and Miller.</div>
+  <div class="ev ctx"><span class="yr">2000</span>SEC 2 publishes the curve <b>secp256k1</b>.</div>
+  <div class="ev"><span class="yr">2001</span><b>SHA-2</b> family (SHA-256, SHA-512) standardised by NIST.</div>
+  <div class="ev ctx"><span class="yr">2009</span>Bitcoin launches, using secp256k1 and SHA-256.</div>
+  <div class="ev"><span class="yr">2012</span><b>BIP-32</b> hierarchical deterministic wallets. Keccak wins the NIST SHA-3 competition.</div>
+  <div class="ev"><span class="yr">2013</span><b>BIP-39</b> mnemonic code for deterministic keys.</div>
+  <div class="ev"><span class="yr">2014</span><b>BIP-44</b> multi-account hierarchy.</div>
+  <div class="ev"><span class="yr">2015</span><b>SHA-3</b> published as FIPS 202, based on Keccak. Ethereum mainnet launches, already committed to the original Keccak.</div>
+  <div class="ev"><span class="yr">2016</span><b>EIP-55</b> mixed-case checksum addresses.</div>
+</div>
+<p>The order tells a story. Public-key crypto (RSA, ECC) and standard hashes (SHA-2) came first as general tools. Bitcoin then needed a practical way to back up many keys, which led to BIP-32, BIP-39 and BIP-44. Ethereum reused all of that, chose Keccak while SHA-3 was still being finalised, and finally patched a usability gap (address typos) with EIP-55.</p>
+
+<h3>SHA-2 / SHA-512 vs Keccak / SHA-3 / Keccak-256</h3>
+<p><b>SHA-2</b> (SHA-256, SHA-512) uses the Merkle–Damgård construction: a compression function applied block by block. That construction is vulnerable to length-extension attacks, which is why HMAC is used for keyed hashing (as in BIP-32 and PBKDF2). <b>Keccak</b> is a completely different design, a <i>sponge</i>: a 1600-bit state is permuted while input is absorbed and output is squeezed. It is immune to length extension. NIST selected Keccak as SHA-3 but changed the <b>padding</b> during standardisation by adding domain-separation bits (padding byte 0x06 instead of Keccak's 0x01). Ethereum adopted the pre-standard Keccak. As a result <b>Keccak-256 ≠ SHA3-256</b>: same permutation and capacity, different output for the same input. Try it:</p>
+<div class="panel">
+  <label class="note" for="hin">Input text (UTF-8)</label>
+  <input id="hin" value="" placeholder="(empty string)" style="width:100%">
+  <table class="hashout"><tbody id="hout"></tbody></table>
+</div>
+
+<h2>6. Why several primitives instead of one?</h2>
+<p>Each step needs a property the others do not have, and no single algorithm offers them all:</p>
+<ul>
+  <li><b>BIP-39 / BIP-32 / BIP-44 → key management.</b> Humans need one short, writable backup that can recreate unlimited keys in a standard place. This calls for an encoding with error detection (words + checksum), a slow KDF against guessing (PBKDF2), and a deterministic tree (HMAC-SHA512) with a standard map (paths).</li>
+  <li><b>secp256k1 → ownership.</b> Others must be able to verify that you authorised a transaction without learning your secret. Only an asymmetric scheme with algebraic structure (Q = kG, ECDSA) can do that; a hash cannot sign.</li>
+  <li><b>Keccak-256 → identifiers.</b> A compact, fixed-size, collision-resistant fingerprint of the public key. A hash must have <i>no</i> structure, which is the opposite of what signatures need.</li>
+  <li><b>EIP-55 → error detection.</b> Catching typos cheaply and backward-compatibly is a usability problem, not a security one, so a simple checksum is enough.</li>
+</ul>
+<p>Separating the roles also limits damage. If one primitive weakened, it could be swapped (for example a new derivation path or address format) without redesigning everything. Using one key for many purposes, by contrast, is a classic cause of cross-protocol attacks.</p>
+
+<h2>7. Statistical properties</h2>
+<p>The experiments below run in your browser on randomly generated test wallets.</p>
+
+<h3>7.1 BIP-39 checksum: how many random word lists are valid?</h3>
+<p>12 words carry 132 bits, of which 4 are checksum, so a random list of 12 words should be valid with probability 2⁻⁴ = 1/16 = 6.25 %. A single wrong word is detected with probability 15/16.</p>
+<div class="panel controls"><button id="e1">Run 20,000 random 12-word lists</button><span id="e1o" class="note"></span></div>
+
+<h3>7.2 Avalanche along the pipeline</h3>
+<p>Take random entropy, flip <b>one bit</b>, and measure how much each stage changes.</p>
+<div class="panel controls"><button id="e2">Run 60 trials</button><span id="e2o" class="note"></span></div>
+<div id="c2"></div>
+<p id="t2" class="note"></p>
+
+<h3>7.3 Are addresses uniformly distributed?</h3>
+<p>Derive many addresses (<code>m/44′/60′/0′/0/i</code>, i = 0 … N−1) from a random phrase and test their hex digits and bits.</p>
+<div class="panel controls"><button id="e3">Derive 1000 addresses</button><span id="e3o" class="note"></span></div>
+<div id="c3a"></div>
+<div id="c3b"></div>
+<p id="t3" class="note"></p>
+
+<h3>7.4 EIP-55: how strong is the checksum?</h3>
+<p>Only letters (a–f) can carry a check bit, and each hex digit is a letter with probability 6/16. The number of check bits in an address is therefore about Binomial(40, 3/8), with mean 15. A random wrong address passes with probability E[2<sup>−L</sup>] = (1 − 3/16)<sup>40</sup> ≈ 0.0247 %.</p>
+<div id="c4"></div>
+<div class="panel controls"><button id="e4">Test 300,000 random mixed-case addresses</button><span id="e4o" class="note"></span></div>
+
+<h3>7.5 Discussion</h3>
+<ul>
+  <li><b>Entropy is the only source of unpredictability.</b> Everything after it is deterministic, so the security of all keys equals the 128 (or 256) bits drawn at the start. Hashing and derivation can preserve randomness but never add any.</li>
+  <li><b>Encodings and checksums are not mixing functions.</b> Flipping one entropy bit changes one word, plus sometimes the last word through the checksum. There is no avalanche there, and none is wanted. Avalanche appears as soon as a hash or KDF is applied: seed, keys and address each change in about 50 % of their bits.</li>
+  <li><b>Hash outputs are statistically uniform.</b> Address digits and bits pass chi-square and balance tests, as expected from Keccak-256. The private key looks uniform too, because it is derived through HMAC-SHA512 and reduced mod n.</li>
+  <li><b>Uniformity is not security.</b> These tests would also pass for a hash of a 20-bit secret. Security comes from the size of the input space (2¹²⁸ phrases), the slowness of PBKDF2, and the one-wayness of ECDLP and Keccak.</li>
+  <li><b>Collision probabilities.</b> With 160-bit addresses, the birthday bound for <i>some</i> collision is about 2⁸⁰ addresses. Hitting a <i>specific</i> address needs about 2¹⁶⁰ tries. Both are far out of reach.</li>
+  <li><b>Checksums trade bits for error detection.</b> BIP-39 spends 4–8 bits (1/16 to 1/256 false-accept rate). EIP-55 spends about 15 "free" bits of letter case (≈ 1/4000 false-accept rate) without changing the address.</li>
+</ul>
+
+<footer><a href="../hw1/">← HW1</a> · <a href="../">All homework</a> · Libraries: <a href="https://github.com/ethers-io/ethers.js">ethers.js</a> v6 and <a href="https://github.com/emn178/js-sha3">js-sha3</a> (MIT), bundled locally.</footer>
+</main>
+
+<script src="../assets/vendor/ethers.umd.min.js"></script>
+<script src="../assets/vendor/sha3.min.js"></script>
+<script src="../assets/charts.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const E = window.ethers;
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const hexToBits = (h) => [...h.replace(/^0x/, "")].map((c) => parseInt(c, 16).toString(2).padStart(4, "0")).join("");
+const popcount8 = (v) => { let c = 0; while (v) { v &= v - 1; c++; } return c; };
+const hamHex = (a, b) => { const x = E.getBytes(a), y = E.getBytes(b); let c = 0; for (let i = 0; i < x.length; i++) c += popcount8(x[i] ^ y[i]); return c; };
+const short = (h, n = 18) => (h.length > 2 * n + 3 ? h.slice(0, n + 2) + "…" + h.slice(-n) : h);
+
+function eip55(lowerNo0x) {           // returns checksummed address without 0x
+  const h = keccak256(lowerNo0x);      // js-sha3: Keccak-256 of the ASCII text
+  let o = "";
+  for (let i = 0; i < 40; i++) { const c = lowerNo0x[i]; o += c >= "a" && parseInt(h[i], 16) >= 8 ? c.toUpperCase() : c; }
+  return o;
+}
+
+function pipeline() {
+  $("#mnerr").textContent = "";
+  let m;
+  const phrase = $("#mn").value.trim().toLowerCase().split(/\s+/).join(" ");
+  try { m = E.Mnemonic.fromPhrase(phrase, $("#pass").value); }
+  catch (e) { $("#mnerr").textContent = "Invalid mnemonic: " + (e.shortMessage || e.message).replace(/\(.*$/, "") + " (wrong word or failed checksum)."; return; }
+  const idx = Math.max(0, Math.floor(+$("#idx").value || 0));
+  const path = `m/44'/60'/0'/0/${idx}`;
+  // entropy + checksum
+  const ent = m.entropy, ENT = (ent.length - 2) * 4, CS = ENT / 32;
+  const entBits = hexToBits(ent), csBits = hexToBits(E.sha256(ent)).slice(0, CS);
+  $("#v-ent").textContent = ent;
+  $("#v-entn").innerHTML = `${ENT} bits of entropy + ${CS}-bit checksum (first bits of SHA-256(entropy) = <span class="cs">${csBits}</span>) = ${ENT + CS} bits = ${(ENT + CS) / 11} words × 11 bits.`;
+  const all = entBits + csBits, words = m.phrase.split(" ");
+  $("#v-words").innerHTML = words.map((w, i) => {
+    let bits = all.slice(i * 11, i * 11 + 11);
+    if (i === words.length - 1) bits = bits.slice(0, 11 - CS) + `<span class="cs">${bits.slice(11 - CS)}</span>`;
+    return `<div class="word"><b>${i + 1}. ${w}</b><br><span class="mono">#${E.wordlists.en.getWordIndex(w)} · ${bits}</span></div>`;
+  }).join("");
+  // seed, master
+  const seed = m.computeSeed();
+  $("#v-seed").textContent = seed;
+  const I = E.computeHmac("sha512", E.toUtf8Bytes("Bitcoin seed"), seed);
+  $("#v-master").innerHTML = `private key IL = ${"0x" + I.slice(2, 66)}<br>chain code IR = ${"0x" + I.slice(66)}`;
+  $("#v-pathinline").textContent = path;
+  const node = E.HDNodeWallet.fromSeed(seed).derivePath(path);
+  $("#v-priv").textContent = node.privateKey;
+  const pub = E.SigningKey.computePublicKey(node.privateKey, false);
+  $("#v-pub").innerHTML = `04 ‖ X = ${pub.slice(4, 68)}<br>&nbsp;&nbsp;&nbsp; ‖ Y = ${pub.slice(68)}`;
+  const kec = E.keccak256("0x" + pub.slice(4));
+  $("#v-kec").innerHTML = `${kec.slice(0, 26)}<b style="color:var(--s2)">${kec.slice(26)}</b>`;
+  const lower = kec.slice(26);
+  $("#v-addr").textContent = "0x" + lower;
+  const chk = eip55(lower), h = keccak256(lower);
+  $("#v-eip").innerHTML = "0x" + [...chk].map((c, i) => `<span class="${/[A-F]/.test(c) ? "up" : /[a-f]/.test(c) ? "lo" : "dg"}" title="hash nibble ${h[i]}">${c}</span>`).join("");
+  const letters = [...lower].filter((c) => c >= "a").length, ups = [...chk].filter((c) => /[A-F]/.test(c)).length;
+  $("#v-eipn").innerHTML = `${letters} letters → ${letters} check bits (${ups} upper-cased). ` +
+    (chk === node.address.slice(2) ? `<span class="yes">✓ matches ethers.js: ${node.address}</span>` : `<span class="no">mismatch with ethers.js</span>`);
+}
+function randomPhrase() {
+  const n = +$("#nwords").value, bytes = (n * 11 - n * 11 / 33) / 8;
+  return E.Mnemonic.fromEntropy(E.randomBytes(bytes)).phrase;
+}
+$("#rand").onclick = () => { $("#mn").value = randomPhrase(); pipeline(); };
+$("#testv").onclick = () => { $("#mn").value = "test test test test test test test test test test test junk"; $("#pass").value = ""; $("#idx").value = 0; pipeline(); };
+["#mn", "#pass", "#idx"].forEach((s) => $(s).addEventListener("input", pipeline));
+pipeline();
+
+// hash comparison
+function hashes() {
+  const t = $("#hin").value, b = E.toUtf8Bytes(t);
+  const rows = [["SHA-256 (SHA-2)", E.sha256(b).slice(2)], ["SHA-512 (SHA-2)", E.sha512(b).slice(2)], ["SHA3-256 (FIPS 202)", sha3_256(t)], ["Keccak-256 (Ethereum)", keccak256(t)]];
+  $("#hout").innerHTML = rows.map(([n, v]) => `<tr><td style="white-space:nowrap">${n}</td><td>${v}</td></tr>`).join("");
+}
+$("#hin").addEventListener("input", hashes); hashes();
+
+// ---------- experiments ----------
+const sleep = () => new Promise((r) => setTimeout(r, 0));
+const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+
+$("#e1").onclick = async () => {
+  const wl = E.wordlists.en, T = 20000; let ok = 0;
+  const rnd = new Uint16Array(12);
+  for (let t = 0; t < T; t++) {
+    crypto.getRandomValues(rnd);
+    const ph = Array.from(rnd, (v) => wl.getWord(v & 2047)).join(" ");
+    if (E.Mnemonic.isValidMnemonic(ph)) ok++;
+    if (t % 2000 === 0) { $("#e1o").textContent = `running… ${t}`; await sleep(); }
+  }
+  const p = ok / T, se = Math.sqrt(p * (1 - p) / T);
+  $("#e1o").innerHTML = `<b>${ok}</b> of ${T} valid = <b>${(p * 100).toFixed(2)} %</b> (95 % CI ${((p - 1.96 * se) * 100).toFixed(2)}–${((p + 1.96 * se) * 100).toFixed(2)} %), theory 6.25 %.`;
+};
+
+$("#e2").onclick = async () => {
+  const T = 60, res = { words: [], wordsN: [], seed: [], priv: [], addr: [] };
+  for (let t = 0; t < T; t++) {
+    const ent = E.getBytes(E.randomBytes(16)), ent2 = new Uint8Array(ent);
+    const bit = Math.floor(Math.random() * 128); ent2[bit >> 3] ^= 1 << (bit & 7);
+    const m1 = E.Mnemonic.fromEntropy(ent), m2 = E.Mnemonic.fromEntropy(ent2);
+    const w1 = m1.phrase.split(" "), w2 = m2.phrase.split(" ");
+    const dw = w1.filter((w, i) => w !== w2[i]).length;
+    const s1 = m1.computeSeed(), s2 = m2.computeSeed();
+    const n1 = E.HDNodeWallet.fromSeed(s1).derivePath("m/44'/60'/0'/0/0"), n2 = E.HDNodeWallet.fromSeed(s2).derivePath("m/44'/60'/0'/0/0");
+    res.words.push(dw / 12); res.wordsN.push(dw);
+    res.seed.push(hamHex(s1, s2) / 512); res.priv.push(hamHex(n1.privateKey, n2.privateKey) / 256); res.addr.push(hamHex(n1.address, n2.address) / 160);
+    if (t % 10 === 0) { $("#e2o").textContent = `running… ${t}/${T}`; await sleep(); }
+  }
+  $("#e2o").textContent = `${T} trials done.`;
+  const labels = ["Entropy (1 bit)", "Mnemonic words", "Seed", "Private key", "Address"];
+  barChart($("#c2"), { title: "Average share that changes after flipping one entropy bit", caption: "Entropy: 1/128 of the bits by construction. Words: share of the 12 words that differ. Other stages: share of bits that differ.", labels, series: [{ name: "changed", values: [1 / 128, mean(res.words), mean(res.seed), mean(res.priv), mean(res.addr)], color: css("--s1") }], ref: 0.5, refLabel: "50 % (ideal avalanche)", yMax: 0.6, yFmt: (v) => Math.round(v * 100) + "%", height: 230 });
+  const cnt = {}; res.wordsN.forEach((d) => (cnt[d] = (cnt[d] || 0) + 1));
+  $("#t2").innerHTML = `Words changed per trial: ${Object.entries(cnt).map(([k, v]) => `${k} word${k > 1 ? "s" : ""} in ${v} trials`).join(", ")}. ` +
+    `One flipped bit changes the word containing it, plus the last word when the SHA-256 checksum changes (almost always). ` +
+    `From the seed on, about half of the bits flip (seed ${(mean(res.seed) * 100).toFixed(1)} %, private key ${(mean(res.priv) * 100).toFixed(1)} %, address ${(mean(res.addr) * 100).toFixed(1)} %): PBKDF2, HMAC-SHA512 and Keccak-256 all behave like random functions.`;
+};
+
+$("#e3").onclick = async () => {
+  const N = 1000, m = E.Mnemonic.fromEntropy(E.randomBytes(16));
+  const acc = E.HDNodeWallet.fromSeed(m.computeSeed()).derivePath("m/44'/60'/0'/0");
+  const addrs = [];
+  for (let i = 0; i < N; i++) { addrs.push(acc.deriveChild(i).address.slice(2).toLowerCase()); if (i % 100 === 0) { $("#e3o").textContent = `deriving… ${i}/${N}`; await sleep(); } }
+  $("#e3o").textContent = `${N} addresses from a random phrase.`;
+  window._addrs = addrs;
+  const f = new Array(16).fill(0); addrs.forEach((a) => [...a].forEach((c) => f[parseInt(c, 16)]++));
+  const expd = (N * 40) / 16, chi = f.reduce((s, o) => s + (o - expd) ** 2 / expd, 0);
+  barChart($("#c3a"), { title: "Frequency of each hex digit in the addresses", caption: `${N * 40} digits; dashed line = expected count under uniformity`, labels: [..."0123456789abcdef"], series: [{ name: "count", values: f, color: css("--s1") }], ref: expd, refLabel: "expected " + expd, height: 210 });
+  const ones = new Array(160).fill(0); addrs.forEach((a) => { const b = hexToBits(a); for (let j = 0; j < 160; j++) ones[j] += b[j] === "1"; });
+  const frac = ones.map((o) => o / N);
+  barChart($("#c3b"), { title: "Share of 1-bits at each of the 160 bit positions", caption: "Bit 0 is the most significant", labels: frac.map((_, j) => String(j)), series: [{ name: "share of 1s", values: frac, color: css("--s2") }], ref: 0.5, refLabel: "0.5", yMax: 1, yFmt: (v) => v.toFixed(2), height: 200 });
+  const all = mean(frac), sdb = Math.sqrt(0.25 / N);
+  const out = frac.filter((v) => Math.abs(v - 0.5) > 1.96 * sdb).length;
+  $("#t3").innerHTML = `Chi-square for the 16 digit frequencies: <b>χ² = ${chi.toFixed(1)}</b> with 15 degrees of freedom (5 % critical value 25.0) → ${chi < 25 ? '<span class="yes">uniformity not rejected</span>' : '<span class="no">rejected at 5 % (expected to happen by chance 1 time in 20)</span>'}. ` +
+    `Overall share of 1-bits: <b>${all.toFixed(4)}</b>. Bit positions outside 0.5 ± ${(1.96 * sdb).toFixed(3)}: <b>${out}</b> of 160 (about 8 expected by chance at the 5 % level). ` +
+    `Contrast with HW1, where raw curve coordinates were visibly non-uniform: after Keccak-256 that structure is gone.`;
+};
+
+// 7.4 theoretical distribution of check bits (letters)
+(function () {
+  const C = (n, k) => { let r = 1; for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i; return r; };
+  const q = 6 / 16, labels = [], th = [];
+  for (let L = 3; L <= 28; L++) { labels.push(String(L)); th.push(C(40, L) * q ** L * (1 - q) ** (40 - L)); }
+  window._eipTh = { labels, th };
+  barChart($("#c4"), { title: "Number of EIP-55 check bits per address", caption: "Binomial(40, 3/8). Run 7.3 to overlay the letters counted in the derived addresses.", labels, series: [{ name: "theory", values: th, color: css("--s1") }], yFmt: (v) => Math.round(v * 100) + "%", height: 200 });
+})();
+const _e3 = $("#e3").onclick;
+$("#e3").onclick = async () => {
+  await _e3();
+  const addrs = window._addrs, n = addrs.length;
+  const { labels, th } = window._eipTh, obs = new Array(labels.length).fill(0); let tot = 0;
+  addrs.forEach((a) => { const L = [...a].filter((c) => c >= "a").length; tot += L; const j = L - 3; if (j >= 0 && j < obs.length) obs[j]++; });
+  barChart($("#c4"), { title: "Number of EIP-55 check bits per address", caption: `Binomial(40, 3/8) vs ${n} derived addresses (observed mean ${(tot / n).toFixed(2)}, theory 15)`, labels, series: [{ name: "theory", values: th, color: css("--s1") }, { name: "observed", values: obs.map((v) => v / n), color: css("--s2") }], yFmt: (v) => Math.round(v * 100) + "%", height: 200 });
+};
+
+$("#e4").onclick = async () => {
+  const T = 300000, hex = "0123456789abcdef", r = new Uint8Array(80); let pass = 0;
+  for (let t = 0; t < T; t++) {
+    crypto.getRandomValues(r);
+    let lower = "", guess = "";
+    for (let i = 0; i < 40; i++) { const c = hex[r[i] & 15]; lower += c; guess += c >= "a" && r[40 + i] & 1 ? c.toUpperCase() : c; }
+    if (eip55(lower) === guess) pass++;
+    if (t % 20000 === 0) { $("#e4o").textContent = `running… ${t}`; await sleep(); }
+  }
+  const th = Math.pow(1 - 3 / 16, 40);
+  $("#e4o").innerHTML = `<b>${pass}</b> of ${T.toLocaleString("en")} random case patterns passed = <b>${((pass / T) * 100).toFixed(4)} %</b> (expected ≈ ${(th * T).toFixed(0)}, i.e. ${(th * 100).toFixed(4)} %).`;
+};
+</script>
+</body>
+</html>
