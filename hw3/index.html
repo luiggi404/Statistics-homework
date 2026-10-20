@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HW3 · Two ciphers and their attacks</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .io { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .85rem; word-break: break-all; }
+  .ct-row { display:flex; flex-wrap:wrap; gap:4px; margin:8px 0; }
+  .cell { border:1px solid var(--line); border-radius:5px; padding:2px 6px; font-family:ui-monospace,Menlo,monospace; font-size:.78rem; background:var(--panel); }
+  .cell b { color:var(--s1); } .cell i { color:var(--s2); font-style:normal; }
+  .key-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--s2); margin-right:5px; vertical-align:1px; }
+  .steps { max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:8px; font-size:.8rem; }
+  .steps div { padding:3px 10px; border-bottom:1px solid var(--line); font-family:ui-monospace,Menlo,monospace; }
+  .steps div:last-child { border-bottom:none; }
+  .steps .hit { background:var(--s1-soft); font-weight:600; }
+  mark { background:var(--s2-soft); color:inherit; padding:0 2px; border-radius:3px; }
+  .keybar { display:grid; grid-template-columns:repeat(13,1fr); gap:3px; margin:8px 0; }
+  @media(max-width:560px){ .keybar{ grid-template-columns:repeat(7,1fr); } }
+  .keybar button { padding:4px 0; font-size:.75rem; font-family:ui-monospace,monospace; }
+  .keybar button.best { background:var(--s1); color:#fff; border-color:transparent; font-weight:700; }
+  .big-num { font-size:1.4rem; font-weight:700; font-variant-numeric:tabular-nums; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:12px 0; }
+  .tile { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--panel); }
+  .tile .lbl { font-size:.78rem; color:var(--fg2); } .tile .big-num { color:var(--s1); }
+</style>
+</head>
+<body>
+<main>
+<p class="crumb"><a href="../">Statistics Homework</a> / HW3</p>
+<h1>HW3 — Two ciphers and the statistics of breaking them</h1>
+<p class="sub">A toy elliptic-curve scheme (built on the curve from HW1) and the Caesar cipher, encrypting the same message, then attacked: letter statistics against Caesar, and an exhaustive search against a deliberately small EC key space.</p>
+
+<div class="def"><b>What this page is about.</b> Two encryption schemes could not look more different — one is 2000 years old and shifts the alphabet, the other multiplies points on an elliptic curve — yet both are broken here, instantly, because their <i>key spaces</i> are tiny. The homework is really about <b>how</b> they break: the Caesar cipher falls to the statistical fingerprint of a language, the toy EC scheme falls to brute force over a restricted range. The last section explains why neither attack threatens a properly sized system.</div>
+
+<p>The message used throughout (change it anywhere):</p>
+<div class="panel"><input id="msg" value="Meet me at the old bridge at dawn." style="width:100%"></div>
+
+<h2>1. Toy elliptic-curve encryption</h2>
+<div class="def"><b>Definition.</b> Public-key (asymmetric) encryption uses a <i>public key</i> to encrypt and a different, secret <i>private key</i> to decrypt. Here the keys are points and scalars on the small curve y² = x³ + 7 (mod p) from HW1. Because inverting "multiply the base point by the private key" is hard in general, only the holder of the private key can read the message — unless, as in this homework, the key is drawn from a tiny range.</div>
+
+<h3>Parameters and keys</h3>
+<div class="panel controls">
+  <label>Curve
+    <select id="ecp"><option value="1669">p = 1669 (prime order 1663)</option><option value="2503">p = 2503 (prime order 2557)</option><option value="97">p = 97 (order 79)</option></select>
+  </label>
+  <label>Base point G <select id="ecg"></select></label>
+  <label>Private key d (restricted!) <input id="ecd" type="number" min="1" value="777"></label>
+  <span id="ecinfo" class="note"></span>
+</div>
+<p class="note">The scheme (a toy EC-ElGamal / ECIES):</p>
+<ol class="note" style="margin-top:4px">
+  <li><b>Keys.</b> Private key d is a secret scalar in [1, n−1]. Public key is the point Q = d·G.</li>
+  <li><b>Encrypt</b> one character m (with the public key Q): pick a fresh random ephemeral scalar r, send C₁ = r·G, and compute the shared point S = r·Q. Mask the character with the x-coordinate of S: C₂ = m ⊕ (S.x mod 256). Ciphertext = (C₁, C₂).</li>
+  <li><b>Decrypt</b> (with the private key d): recover the same point S = d·C₁ = d·(r·G) = r·(d·G) = r·Q, so the mask S.x mod 256 is the same, and m = C₂ ⊕ mask.</li>
+</ol>
+<p class="note">The private key's <b>role</b> is to make S computable from C₁: it is the only secret, and everything else (p, G, Q, C₁) is public. Security rests on the attacker not being able to find d from Q = d·G (the elliptic-curve discrete-log problem) nor S from C₁ and Q (the Diffie–Hellman problem).</p>
+<div class="panel">
+  <p class="note" style="margin-top:0">Ciphertext of your message (one (C₁, C₂) pair per character; C₁ shown as its x-coordinate):</p>
+  <div id="ec-ct" class="ct-row"></div>
+  <p class="io">Decrypted with d: <b id="ec-dec"></b></p>
+</div>
+
+<h2>2. The Caesar cipher</h2>
+<div class="def"><b>Definition.</b> The Caesar cipher is a <i>symmetric monoalphabetic substitution</i>: every letter is shifted forward by a fixed number k (the key, 0–25), wrapping around Z→A. The same k decrypts by shifting back. It is symmetric — one key both encrypts and decrypts — and the key space has only 26 values (25 useful ones).</div>
+<div class="panel controls">
+  <label>Shift k <input id="ck" type="number" min="0" max="25" value="3"></label>
+  <input id="ckrange" type="range" min="0" max="25" value="3" style="flex:1;min-width:140px">
+</div>
+<p class="io">Plaintext&nbsp;: <span id="c-pt"></span></p>
+<p class="io">Ciphertext: <mark id="c-ct"></mark></p>
+<p class="note">Each letter maps to exactly one other letter, the same way every time, so the cipher just renames the alphabet — which is precisely what lets statistics undo it.</p>
+
+<h2>3. Comparing the two schemes</h2>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th></th><th>Caesar cipher</th><th>Toy EC scheme</th></tr></thead>
+  <tbody>
+    <tr><td><b>Type</b></td><td>Symmetric, monoalphabetic substitution</td><td>Asymmetric (public-key)</td></tr>
+    <tr><td><b>Keys</b></td><td>One shared key k (0–25), used to encrypt and decrypt</td><td>Public Q = d·G to encrypt, private d to decrypt</td></tr>
+    <tr><td><b>Encrypt</b></td><td>c = (m + k) mod 26</td><td>C₁ = rG, C₂ = m ⊕ (rQ).x — randomised, so the same message encrypts differently each time</td></tr>
+    <tr><td><b>Decrypt</b></td><td>m = (c − k) mod 26</td><td>m = C₂ ⊕ (d·C₁).x</td></tr>
+    <tr><td><b>Key space</b></td><td class="big"><b>26</b> (≈ 2⁴·⁷)</td><td class="big">n − 1 points (here <b id="cmp-n">1662</b>); a real curve: ≈ 2²⁵⁶</td></tr>
+    <tr><td><b>Ciphertext statistics</b></td><td><span class="no">Leaks everything</span>: the letter-frequency profile is just the plaintext's, rotated by k</td><td><span class="yes">Flat</span>: the mask is a hash-like function of a point, and the ephemeral r randomises every character</td></tr>
+    <tr><td><b>How it breaks here</b></td><td>Match the frequency profile to the language (statistical attack)</td><td>Try every private key in the small range (exhaustive search)</td></tr>
+    <tr><td><b>Why it breaks</b></td><td>Key space is tiny <b>and</b> the ciphertext keeps the plaintext's statistics</td><td>Key space was artificially restricted; the design itself is sound</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>4. Statistical cryptanalysis of the Caesar cipher</h2>
+<p>A Caesar shift moves the whole letter-frequency histogram sideways by k. English has a very distinctive profile (E ≈ 12.7 %, then T, A, O…), so we just find the rotation that lines the ciphertext up with the language. The model below is <b>trained on a real corpus</b> (≈ 1 million letters of Jane Austen and G. K. Chesterton, public domain); the test texts are held-out (Lewis Carroll), so the attack never sees its targets during training.</p>
+<p id="model-status" class="note">Loading the trained corpus model…</p>
+
+<h3>4.1 The letter fingerprint</h3>
+<p>Type or shift a message and watch the ciphertext histogram slide away from English. The attack slides it back.</p>
+<div id="freqchart"></div>
+
+<h3>4.2 Three attacks</h3>
+<p>Enter any ciphertext (or press "Encrypt the message above" to fill it), then let each method guess the key. All 26 shifts are scored; the winner is highlighted.</p>
+<div class="panel">
+  <div class="controls">
+    <button id="fill">Encrypt the message above (random k)</button>
+    <span id="truek" class="note"></span>
+  </div>
+  <textarea id="attack-in" rows="2" style="margin-top:10px">Aol zahapzapjz vm h shunbhnl ylclhs aol rlf</textarea>
+  <div class="controls" style="margin-top:10px">
+    <label>Method
+      <select id="method">
+        <option value="brute">Exhaustive search (show all 26)</option>
+        <option value="chi">Letter frequencies — χ²</option>
+        <option value="ll" selected>Letter frequencies — log-likelihood</option>
+        <option value="bigram">Bigram log-likelihood</option>
+      </select>
+    </label>
+    <button id="run">Recover key</button>
+  </div>
+  <div class="keybar" id="keybar"></div>
+  <p class="io">Best key <b id="best-k"></b> → <span id="best-dec"></span></p>
+  <div id="brute-list" class="steps" style="display:none"></div>
+</div>
+
+<h3>4.3 How much ciphertext is enough?</h3>
+<p>Success rate of each method as a function of ciphertext length, measured on 800 random crops of the held-out text per point (random key each time). Chance level is 1/26 ≈ 3.8 %.</p>
+<div id="lenchart"></div>
+<p id="lentext" class="note"></p>
+
+<h3>4.4 Effectiveness and limitations</h3>
+<ul>
+  <li><b>Single letters work from ~20 characters.</b> By 30–50 letters unigram χ² and log-likelihood are essentially perfect: a short sentence is enough.</li>
+  <li><b>Bigrams win on very short texts.</b> With 5–15 letters, scoring letter <i>pairs</i> (TH, HE, IN…) beats single letters, because word-boundary structure survives even when the single-letter counts are too noisy. By 20+ letters all methods converge.</li>
+  <li><b>The limitation is short or atypical text.</b> On a 5-letter fragment even the best method is near 50 %, because several shifts can look plausible. Text that does not match the training language (names, code, another language, deliberately odd letter use like "jazz") also degrades the attack.</li>
+  <li><b>Exhaustive search is trivially possible too</b> — only 25 keys — but it still needs a human or a language model to recognise the right plaintext. The statistical score <i>is</i> that recogniser, automated.</li>
+</ul>
+
+<h2>5. Attacking the restricted EC key space</h2>
+<p>The toy scheme is asymmetric and its ciphertext carries no usable statistics, so the Caesar approach is useless here. The weakness is elsewhere: the homework <b>restricts the private key to a small range</b> to keep experiments fast. That turns the discrete-log problem — normally the hard core of EC security — into a short search. Recover d from the public key Q = d·G, then decrypt.</p>
+
+<h3>5.1 Recover the private key</h3>
+<div class="panel">
+  <div class="controls">
+    <button id="atk-brute">Brute force: try d = 1, 2, 3, …</button>
+    <button id="atk-bsgs" class="ghost">Baby-step giant-step (√n)</button>
+    <span id="atk-info" class="note"></span>
+  </div>
+  <div class="tiles" id="atk-tiles" style="display:none">
+    <div class="tile"><div class="lbl">Recovered private key d</div><div class="big-num" id="t-d"></div></div>
+    <div class="tile"><div class="lbl">Group operations used</div><div class="big-num" id="t-steps"></div></div>
+    <div class="tile"><div class="lbl">Matches real d?</div><div class="big-num" id="t-match"></div></div>
+  </div>
+  <p class="io" id="atk-dec" style="display:none">Message decrypted with the recovered key: <b id="t-msg"></b></p>
+</div>
+<p class="note">Baby-step giant-step is the reason the "small range" matters so much: it finds d in about √n steps instead of n, by trading memory for time. Both methods find the same key here; the point is how their cost grows.</p>
+
+<h3>5.2 Why this does not scale</h3>
+<p>The attacks above finish in microseconds because n is a few thousand. The cost of the best generic discrete-log attack is about √n group operations. Watch what √n does as the key space grows toward a real curve:</p>
+<div id="scalechart"></div>
+<p id="scaletext" class="note"></p>
+<div class="tiles">
+  <div class="tile"><div class="lbl">Toy curve, n ≈ 1663</div><div class="big-num">~41</div><div class="lbl">√n steps — instant</div></div>
+  <div class="tile"><div class="lbl">32-bit key</div><div class="big-num">~65k</div><div class="lbl">√n steps — a blink</div></div>
+  <div class="tile"><div class="lbl">secp256k1, n ≈ 2²⁵⁶</div><div class="big-num">2¹²⁸</div><div class="lbl">√n steps — infeasible</div></div>
+</div>
+
+<h3>5.3 Caesar attack vs EC attack</h3>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th></th><th>Statistical attack (Caesar)</th><th>Key-search attack (toy EC)</th></tr></thead>
+  <tbody>
+    <tr><td><b>What it exploits</b></td><td>Structure <i>in the ciphertext</i> — it preserves the language's letter statistics</td><td>Smallness <i>of the key space</i> — the ciphertext itself reveals nothing</td></tr>
+    <tr><td><b>Needs</b></td><td>A model of the plaintext language; enough ciphertext to be statistically significant</td><td>Only the public values (p, G, Q); no plaintext knowledge at all</td></tr>
+    <tr><td><b>Cost driver</b></td><td>Ciphertext length (signal), not key count</td><td>Key-space size n (√n with BSGS)</td></tr>
+    <tr><td><b>Fix</b></td><td>Destroy the statistics (polyalphabetic ciphers, then modern encryption) — enlarging the 26-key space alone is not enough</td><td>Enlarge the key space to ~2²⁵⁶; the scheme is otherwise fine</td></tr>
+  </tbody>
+</table>
+</div>
+<p><b>Why the key-search attack fails on a real curve.</b> A properly configured EC scheme draws d uniformly from ≈ 2²⁵⁶ values. Brute force would need ≈ 2²⁵⁶ operations and baby-step giant-step ≈ 2¹²⁸, both far beyond any computer that will ever exist (2¹²⁸ ≈ 3·10³⁸). There is no statistical shortcut like Caesar's: the mask is a hash-like function of a curve point and the ephemeral r re-randomises every character, so the ciphertext distribution is flat and carries no information about d. The toy scheme is broken <b>only</b> because the range of d was shrunk for the exercise — not because elliptic curves are weak.</p>
+
+<h3>5.4 Which weakness is which (optional)</h3>
+<ul>
+  <li><b>From the restricted key space.</b> The decisive one: a short d is found by brute force or BSGS. On a real curve this disappears.</li>
+  <li><b>From the toy design itself.</b> Even with a large d, this toy would be weak for other reasons, and it is worth separating them: (i) the mask is only <b>8 bits</b> (S.x mod 256), so each character has just 256 possible masks — a frequency attack on the <i>masked bytes</i> across a long message becomes possible, independent of the key; (ii) the group is tiny, so points repeat and the "hash" S.x is far from uniform; (iii) there is no integrity check, so ciphertext can be tampered with. Real ECIES fixes these with a proper KDF, a full-size symmetric cipher, and a MAC. These are <i>design</i> weaknesses, present even before the key space is restricted — a useful contrast with Caesar, whose weakness is entirely structural and cannot be patched by a bigger key.</li>
+</ul>
+
+<footer><a href="../hw2/">← HW2</a> · <a href="../">All homework</a> · Corpus: Project Gutenberg (public domain) via the NLTK Gutenberg selection.</footer>
+</main>
+
+<script src="../assets/charts.js"></script>
+<script src="./toycrypto.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const { Toy, Caesar } = window.TC;
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let MODEL = null, SUCCESS = null;
+
+// ---------- Part 1: toy EC ----------
+let EC = {};
+function fillG(p) {
+  const sel = $("#ecg"), pts = Toy.points(BigInt(p));
+  // generators: points of large order. For prime-order curves every point qualifies.
+  const gens = pts.filter((P) => Toy.order(P, BigInt(p)) > Math.min(50, pts.length / 2)).slice(0, 40);
+  sel.innerHTML = gens.map((P) => `<option value="${P[0]},${P[1]}">(${P[0]}, ${P[1]})</option>`).join("");
+}
+function ecUpdate() {
+  const p = BigInt($("#ecp").value), G = $("#ecg").value.split(",").map(BigInt);
+  const n = Toy.order(G, p);
+  let d = Math.max(1, Math.min(n - 1, Math.floor(+$("#ecd").value || 1)));
+  $("#ecd").value = d;
+  const Q = Toy.mul(d, G, p);
+  EC = { p, G, n, d, Q };
+  $("#ecinfo").innerHTML = `ord(G) = ${n}, so d ∈ [1, ${n - 1}]. Public key Q = d·G = ${Toy.fmt(Q)}.`;
+  $("#cmp-n").textContent = n - 1;
+  const msg = $("#msg").value;
+  const cts = Toy.encryptText(msg, p, G, Q, n);
+  EC.cts = cts;
+  $("#ec-ct").innerHTML = cts.slice(0, 40).map((c, i) =>
+    `<span class="cell" title="char '${msg[i]}'">C₁<b>.x=${c.C1 ? c.C1[0] : "O"}</b> C₂=<i>${c.C2}</i></span>`).join("") + (cts.length > 40 ? ` <span class="note">… ${cts.length} chars</span>` : "");
+  $("#ec-dec").textContent = Toy.decryptText(cts, d, p);
+}
+$("#ecp").onchange = () => { fillG($("#ecp").value); ecUpdate(); };
+["#ecg", "#ecd", "#msg"].forEach((s) => $(s).addEventListener("input", () => { ecUpdate(); caesarUpdate(); }));
+
+// ---------- Part 2: Caesar ----------
+function caesarUpdate() {
+  const k = Math.max(0, Math.min(25, +$("#ck").value || 0));
+  const m = $("#msg").value;
+  $("#c-pt").textContent = m;
+  $("#c-ct").textContent = Caesar.caesar(m, k);
+}
+$("#ck").addEventListener("input", () => { $("#ckrange").value = $("#ck").value; caesarUpdate(); });
+$("#ckrange").addEventListener("input", () => { $("#ck").value = $("#ckrange").value; caesarUpdate(); });
+
+// ---------- Part 4: frequency chart ----------
+function freqChart() {
+  if (!MODEL) return;
+  const ct = $("#c-ct").textContent;
+  const c = Caesar.counts(ct), tot = c.reduce((a, b) => a + b, 0) || 1;
+  const obs = c.map((v) => (100 * v) / tot);
+  barChart($("#freqchart"), {
+    title: "Letter frequencies: your ciphertext vs trained English",
+    caption: "Shifting the Caesar key slides the blue bars sideways; the attack finds the shift that matches orange.",
+    labels: [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"],
+    series: [{ name: "ciphertext", values: obs, color: css("--s1") }, { name: "English (corpus)", values: MODEL.uniPct, color: css("--s2") }],
+    yFmt: (v) => v.toFixed(0) + "%", height: 220, xLabel: "letter", yLabel: "%",
+  });
+}
+
+// ---------- Part 4.2: attacks ----------
+function renderKeybar(scores, best, higherBetter) {
+  const bar = $("#keybar"); bar.innerHTML = "";
+  for (let k = 0; k < 26; k++) {
+    const b = document.createElement("button");
+    b.className = "ghost" + (k === best ? " best" : "");
+    b.textContent = k;
+    b.title = "score " + scores[k].toFixed(1);
+    b.onclick = () => { $("#best-k").textContent = k; $("#best-dec").textContent = Caesar.caesar($("#attack-in").value, -k); };
+    bar.appendChild(b);
+  }
+}
+function runAttack() {
+  const ct = $("#attack-in").value, method = $("#method").value;
+  $("#brute-list").style.display = "none";
+  let r, higher = true;
+  if (method === "chi") { r = Caesar.attackChi(ct, MODEL.uniPct); higher = false; }
+  else if (method === "ll") r = Caesar.attackLL(ct, MODEL.loguni);
+  else if (method === "bigram") r = Caesar.attackBigram(ct, MODEL.logbg);
+  else { // brute: list all 26 decryptions, score by log-likelihood for ordering
+    r = Caesar.attackLL(ct, MODEL.loguni);
+    const rows = [];
+    for (let k = 0; k < 26; k++) rows.push([k, Caesar.caesar(ct, -k), r.scores[k]]);
+    const el = $("#brute-list"); el.style.display = "block";
+    el.innerHTML = rows.map(([k, dec, sc]) => `<div class="${k === r.key ? "hit" : ""}">k=${String(k).padStart(2)} · ${dec.slice(0, 60)}</div>`).join("");
+  }
+  renderKeybar(r.scores, r.key, higher);
+  $("#best-k").textContent = r.key;
+  $("#best-dec").textContent = r.decrypt;
+}
+$("#run").onclick = runAttack;
+$("#method").onchange = runAttack;
+$("#fill").onclick = () => {
+  const k = 1 + Math.floor(Math.random() * 25);
+  $("#attack-in").value = Caesar.caesar($("#msg").value, k);
+  $("#truek").innerHTML = `encrypted with k = <b>${k}</b> (see if the attack agrees)`;
+  runAttack();
+};
+
+// ---------- Part 4.3: length chart ----------
+function lenChart() {
+  if (!SUCCESS) return;
+  const L = SUCCESS.lengths;
+  barChart($("#lenchart"), {
+    title: "Attack success rate vs ciphertext length",
+    caption: "800 random held-out crops per length; random key each trial",
+    labels: L.map(String),
+    series: [
+      { name: "χ² (unigram)", values: SUCCESS.chi, color: css("--s1") },
+      { name: "log-likelihood", values: SUCCESS.ll, color: css("--s2") },
+      { name: "bigram", values: SUCCESS.bigram, color: css("--ok") },
+    ],
+    ref: 3.8, refLabel: "chance 3.8%", yMax: 100, yFmt: (v) => v + "%", xLabel: "ciphertext length (letters)", height: 240,
+  });
+  $("#lentext").innerHTML = `At 5 letters the best method (bigram) is around ${SUCCESS.bigram[0]} %, while single-letter methods are near ${SUCCESS.chi[0]} %. ` +
+    `By ${L.find((l, i) => SUCCESS.ll[i] >= 99) || 50} letters all methods exceed 99 %.`;
+}
+
+// ---------- Part 5: EC attack ----------
+function showAttack(res, label) {
+  $("#atk-tiles").style.display = "grid";
+  $("#atk-dec").style.display = "block";
+  $("#t-d").textContent = res.d;
+  $("#t-steps").textContent = res.steps.toLocaleString("en");
+  const ok = res.d === EC.d;
+  $("#t-match").innerHTML = ok ? '<span class="yes">✓ yes</span>' : '<span class="no">no</span>';
+  $("#t-msg").textContent = Toy.decryptText(EC.cts, res.d, EC.p);
+  $("#atk-info").innerHTML = `${label}: recovered d = ${res.d} in ${res.steps.toLocaleString("en")} group operations (key space size n−1 = ${EC.n - 1}).`;
+}
+$("#atk-brute").onclick = () => { const t = performance.now(); const r = Toy.attackBrute(EC.p, EC.G, EC.Q, EC.n); r.ms = performance.now() - t; showAttack(r, "Brute force"); };
+$("#atk-bsgs").onclick = () => { const r = Toy.attackBSGS(EC.p, EC.G, EC.Q, EC.n); showAttack(r, "Baby-step giant-step"); };
+
+function scaleChart() {
+  const bits = [11, 16, 24, 32, 48, 64, 128, 192, 256];
+  const sqrtSteps = bits.map((b) => b / 2); // log2(sqrt(2^b)) = b/2
+  scatterChart($("#scalechart"), {
+    title: "Work to break a key by baby-step giant-step (log scale)",
+    caption: "x = key-space size in bits, y = log₂ of the √n operations needed",
+    points: bits.map((b, i) => [b, sqrtSteps[i]]),
+    xMax: 260, yMax: 130, xLabel: "key size (bits)", yLabel: "log₂(operations)",
+    tip: (q) => `${q[0]}-bit key → 2^${q[1]} ≈ ${q[1] < 30 ? Math.round(2 ** q[1]).toLocaleString("en") : "10^" + Math.round(q[1] * 0.301)} ops`,
+  });
+  $("#scaletext").innerHTML = `The toy curve (11 bits) needs 2⁵·⁵ ≈ 41 operations. secp256k1 (256 bits) needs 2¹²⁸ ≈ 3.4·10³⁸ — if a machine did a trillion (10¹²) per second, this would still take 10¹⁹ years, about a billion times the age of the universe.`;
+}
+
+// ---------- bootstrap ----------
+async function boot() {
+  fillG(1669); ecUpdate(); caesarUpdate();
+  try {
+    MODEL = await (await fetch("./data/model.json")).json();
+    SUCCESS = await (await fetch("./data/caesar-success.json")).json();
+    $("#model-status").innerHTML = `Model trained on <b>${MODEL.letters.toLocaleString("en")}</b> letters. Most frequent: ` +
+      MODEL.uniPct.map((v, i) => [String.fromCharCode(65 + i), v]).sort((a, b) => b[1] - a[1]).slice(0, 6).map((x) => `${x[0]} ${x[1]}%`).join(", ") + ".";
+    freqChart(); runAttack(); lenChart();
+  } catch (e) {
+    $("#model-status").innerHTML = '<span class="no">Could not load the corpus model (data/model.json). The frequency attacks need it.</span>';
+  }
+  scaleChart();
+  ["#ck", "#ckrange", "#msg"].forEach((s) => $(s).addEventListener("input", freqChart));
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { freqChart(); lenChart(); scaleChart(); });
+}
+boot();
+</script>
+</body>
+</html>
