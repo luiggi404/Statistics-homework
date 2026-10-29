@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HW4 · Penetration score as a random walk</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:12px 0; }
+  .tile { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--panel); }
+  .tile .lbl { font-size:.78rem; color:var(--fg2); }
+  .tile .v { font-size:1.35rem; font-weight:700; font-variant-numeric:tabular-nums; color:var(--s1); }
+  .tile .v.o { color:var(--s2); }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .seg button { border-radius:0; background:var(--bg); color:var(--fg); border:none; font-weight:500; padding:6px 14px; }
+  .seg button.on { background:var(--s1); color:#fff; font-weight:600; }
+  .legend span.dash::before { height:0; width:16px; border-top:2px dashed var(--c); background:none; border-radius:0; vertical-align:3px; }
+  .legend span.dot::before { border-radius:50%; }
+  .formula { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:.9rem; background:var(--code); padding:10px 14px; border-radius:8px; overflow-x:auto; white-space:nowrap; }
+  #status { min-height:1.4em; }
+  td.c, th.c { text-align:center; }
+  .kv { font-variant-numeric: tabular-nums; }
+  .slider-row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .slider-row input[type=range] { flex:1; min-width:160px; }
+</style>
+</head>
+<body>
+<main>
+<p class="crumb"><a href="../">Statistics Homework</a> / HW4</p>
+<h1>HW4 — The penetration score as a random walk</h1>
+<p class="sub">n systems, m attackers, i.i.d. increments. Simulated trajectories of the total, average and normalised score; the Law of Large Numbers, the variance under three scalings, and the Central Limit Theorem — all computed live in your browser.</p>
+
+<div class="def"><b>What this page is about.</b> Adding up many small independent random scores produces three very different objects depending on how you scale the sum. Divided by nothing, the total S<sub>n</sub> wanders off and spreads out. Divided by n, it freezes onto a constant (Law of Large Numbers). Divided by √n — and only by √n — it settles into a stable bell-shaped law (Central Limit Theorem). The homework is to see all three happen on simulated attackers and to read them as statements about attacks on a population of systems.</div>
+
+<h2>0. The model</h2>
+<div class="def"><b>Definition.</b> A <i>random walk</i> is the sequence of partial sums S<sub>k</sub> = X<sub>1</sub> + … + X<sub>k</sub> of independent, identically distributed (i.i.d.) increments X<sub>i</sub>. One realisation k ↦ S<sub>k</sub> is a <i>sample trajectory</i>.</div>
+<p><b>How the n systems and m attackers enter.</b> Each of the m attackers works through the n systems one at a time. At system i the attacker earns a score X<sub>i</sub>; the attacker's running score after k systems is S<sub>k</sub>. So every attacker is one sample trajectory of length n, and the m attackers are m independent copies of the process. The distribution of a quantity "at size n" is read across the m attackers at step n.</p>
+<ul>
+  <li><b>Bernoulli model</b>, X<sub>i</sub> ∈ {0, 1}, P(X<sub>i</sub> = 1) = p: X<sub>i</sub> = 1 means system i was penetrated. S<sub>n</sub> is the number of breached systems, S<sub>n</sub>/n the fraction breached. Mean μ = p, variance σ² = p(1 − p).</li>
+  <li><b>Rademacher model</b>, X<sub>i</sub> = ±1 with probability ½ each: a step forward (foothold gained) or backward (detected, access lost). S<sub>n</sub> is the attacker's <i>net</i> progress. Mean μ = 0, variance σ² = 1: the symmetric, zero-mean case.</li>
+</ul>
+
+<div class="panel">
+  <div class="controls">
+    <label>p (Bernoulli) <input id="p" type="number" min="0.01" max="0.99" step="0.01" value="0.3"></label>
+    <label>Systems n (max)
+      <select id="n"><option value="1000">1 000</option><option value="10000" selected>10 000</option><option value="30000">30 000</option></select>
+    </label>
+    <label>Attackers m
+      <select id="m"><option value="200">200</option><option value="1000">1 000</option><option value="2000" selected>2 000</option><option value="5000">5 000</option></select>
+    </label>
+    <label>Seed <input id="seed" type="number" value="42"></label>
+    <button id="run">Simulate</button>
+    <button id="reseed" class="ghost">New seed</button>
+  </div>
+  <p id="status" class="note" style="margin-bottom:0"></p>
+</div>
+<p class="note">Both models are simulated with the same n and m. Every attacker is observed at the checkpoints n = 10, 20, 50, 100, … up to the maximum, so "increasing n" means watching the <i>same</i> attackers progress through more systems. The generator is seeded (xoshiro128**), so a seed reproduces a run exactly.</p>
+
+<h2>1. What theory predicts</h2>
+<div class="def"><b>Definitions.</b> A sequence Y<sub>n</sub> <i>converges in probability</i> to a constant c if, for every ε &gt; 0, P(|Y<sub>n</sub> − c| &gt; ε) → 0. It <i>converges in distribution</i> to a law with CDF F if P(Y<sub>n</sub> ≤ x) → F(x) at every continuity point x of F. The first says the values themselves pile up at c; the second only says the <i>histogram</i> takes a limiting shape.</div>
+<p>By linearity of expectation and independence (variances of independent terms add):</p>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th>Quantity</th><th>Mean</th><th>Variance</th><th>Bernoulli (μ = p)</th><th>Rademacher (μ = 0, σ² = 1)</th><th>As n → ∞</th></tr></thead>
+  <tbody>
+    <tr><td><b>S<sub>n</sub></b></td><td>nμ</td><td>nσ²</td><td>np, np(1−p)</td><td>0, n</td><td>Drifts like n, spreads like √n</td></tr>
+    <tr><td><b>S<sub>n</sub>/n</b></td><td>μ</td><td>σ²/n</td><td>p, p(1−p)/n</td><td>0, 1/n</td><td>→ μ in probability (LLN)</td></tr>
+    <tr><td><b>S<sub>n</sub>/√n</b></td><td>√n μ</td><td>σ²</td><td>√n p, p(1−p)</td><td>0, 1</td><td>Rademacher: → N(0, 1) in distribution (CLT). Bernoulli: the mean √n p diverges</td></tr>
+  </tbody>
+</table>
+</div>
+<p><b>Why √n is the only "stable" scaling.</b> For any power α, Var(S<sub>n</sub>/n<sup>α</sup>) = σ² n<sup>1−2α</sup>. If α &lt; ½ the spread explodes, if α &gt; ½ it collapses to zero (α = 1 is the LLN), and only α = ½ keeps it finite and non-zero. That is why the CLT lives at √n.</p>
+<p><b>The two theorems used below.</b></p>
+<ul>
+  <li><b>Weak LLN</b> (via Chebyshev's inequality): P(|S<sub>n</sub>/n − μ| &gt; ε) ≤ Var(S<sub>n</sub>/n)/ε² = σ²/(nε²) → 0.</li>
+  <li><b>CLT</b>: (S<sub>n</sub> − nμ)/(σ√n) → N(0, 1) in distribution. For Rademacher, nμ = 0 and σ = 1, so this <i>is</i> S<sub>n</sub>/√n. For Bernoulli, S<sub>n</sub>/√n must first be centred by √n p and scaled by σ.</li>
+  <li><b>Berry–Esseen</b> (how fast): sup<sub>x</sub> |P(Z<sub>n</sub> ≤ x) − Φ(x)| ≤ C·ρ/(σ³√n) with ρ = E|X − μ|³ and C ≤ 0.4748. For Rademacher ρ = 1, so the error is at most 0.4748/√n.</li>
+</ul>
+
+<h2>2. Sample trajectories</h2>
+<p>The first attackers' paths through the systems, with the theoretical mean (dashed) and the ±2σ band of each scaling (shaded). One attacker is highlighted in orange to follow a single path.</p>
+<div class="controls" style="margin:8px 0"><div class="seg" id="traj-model"><button data-m="bern" class="on">Bernoulli</button><button data-m="rad">Rademacher</button></div></div>
+<div id="tr-s"></div>
+<div id="tr-avg"></div>
+<div id="tr-norm"></div>
+<p id="tr-text" class="note"></p>
+
+<h2>3. Distributions as n grows</h2>
+<h3>3.1 The same attackers at increasing n</h3>
+<p>Empirical CDFs across the m attackers at several n, on common axes. A CDF that shifts right is drift, one that flattens is spreading, one that becomes a vertical step is concentration, and curves that coincide mean the distribution has stopped changing.</p>
+<div class="controls" style="margin:8px 0"><div class="seg" id="cdf-model"><button data-m="bern" class="on">Bernoulli</button><button data-m="rad">Rademacher</button></div></div>
+<div id="cdf-s"></div>
+<div id="cdf-avg"></div>
+<div id="cdf-norm"></div>
+<p id="cdf-text" class="note"></p>
+
+<h3>3.2 Histograms at one n, against the normal approximation</h3>
+<div class="panel">
+  <div class="slider-row">
+    <span class="seg" id="h-model"><button data-m="bern" class="on">Bernoulli</button><button data-m="rad">Rademacher</button></span>
+    <input id="h-n" type="range" min="0" max="9" value="5"><b id="h-nlbl" class="kv"></b>
+  </div>
+</div>
+<div id="h-s"></div>
+<div id="h-avg"></div>
+<div id="h-norm"></div>
+<div style="overflow-x:auto"><table id="h-table"></table></div>
+<p class="note">Bins are aligned to the lattice the score actually lives on (integers for Bernoulli, integers of the same parity as n for Rademacher), then rescaled with the quantity, so the three histograms are the same data with relabelled axes. The orange curve is the normal density with the theoretical mean and variance of section 1.</p>
+
+<h2>4. Law of Large Numbers: S<sub>n</sub>/n → μ in probability</h2>
+<p>For each n we estimate P(|S<sub>n</sub>/n − μ| &gt; ε) as the fraction of the m attackers whose average score misses μ by more than ε, and compare it with Chebyshev's bound σ²/(nε²) and with the normal approximation 2(1 − Φ(ε√n/σ)).</p>
+<div class="panel controls"><label>ε <input id="eps" type="number" min="0.005" max="0.5" step="0.005" value="0.05"></label><span class="note" id="eps-note"></span></div>
+<div id="lln"></div>
+<p id="lln-text" class="note"></p>
+<ul>
+  <li><b>The probability goes to 0 for both models</b>, as the weak LLN requires. The tolerance ε is arbitrary: a smaller ε only delays the fall, by a factor 1/ε² in n.</li>
+  <li><b>Chebyshev is valid but loose.</b> It only uses the variance, so it decays like 1/n, while the true probability decays exponentially (Hoeffding: ≤ 2e<sup>−2nε²</sup> for Bernoulli). The normal approximation tracks the simulation closely once n is moderate.</li>
+  <li><b>Rademacher concentrates more slowly in absolute terms</b> because σ² = 1 &gt; p(1 − p): the bigger the per-step noise, the more systems are needed for the same precision on the average.</li>
+  <li><b>In probability vs along a path.</b> The trajectory chart of S<sub>k</sub>/k (section 2) shows something stronger: every individual path settles onto μ (strong LLN, almost-sure convergence). The weak LLN only talks about the fraction of paths outside the ε-band at a fixed n.</li>
+</ul>
+
+<h2>5. The variance under the three normalisations</h2>
+<p>Sample variance across the m attackers at each n (points) against the theoretical nσ², σ²/n and σ² (lines), on log–log axes where a power law n<sup>β</sup> is a straight line of slope β.</p>
+<div class="grid2"><div id="var-bern"></div><div id="var-rad"></div></div>
+<div style="overflow-x:auto"><table id="var-table"></table></div>
+<ul>
+  <li><b>Slope +1 for S<sub>n</sub>:</b> the total gets more uncertain as n grows; its standard deviation grows like √n (while for Bernoulli its mean grows like n, so the <i>relative</i> spread still shrinks).</li>
+  <li><b>Slope −1 for S<sub>n</sub>/n:</b> the variance of the average falls like 1/n — this is precisely the mechanism behind the LLN.</li>
+  <li><b>Slope 0 for S<sub>n</sub>/√n:</b> the variance is σ² at every n. This is the scaling where neither spreading nor concentration wins.</li>
+  <li><b>The scatter of the points</b> around the lines is the estimation error of the sample variance, ≈ Var·√(2/m). It does not depend on n: m alone controls it.</li>
+</ul>
+
+<h2>6. Central Limit Theorem: S<sub>n</sub>/√n → N(0, 1)</h2>
+<p>The distance used is the Kolmogorov–Smirnov distance D<sub>n</sub> = sup<sub>x</sub>|F<sub>n</sub>(x) − Φ(x)|, the largest vertical gap between a CDF and the standard normal CDF Φ. Convergence in distribution to N(0, 1) means D<sub>n</sub> → 0 (Φ is continuous everywhere).</p>
+<div id="ks"></div>
+<p id="ks-text" class="note"></p>
+<div class="panel">
+  <div class="slider-row"><span class="note">n =</span><input id="c-n" type="range" min="0" max="9" value="3"><b id="c-nlbl" class="kv"></b></div>
+</div>
+<div class="grid2"><div id="clt-ecdf"></div><div id="clt-bern"></div></div>
+<ul>
+  <li><b>Rademacher: S<sub>n</sub>/√n itself converges.</b> The exact distance (computed from the binomial law, no simulation noise) falls like 1/√n and stays under the Berry–Esseen bound 0.4748/√n. Its leading term is half the central jump of the CDF, about 0.4/√n.</li>
+  <li><b>It converges although every S<sub>n</sub>/√n is discrete.</b> Rademacher S<sub>n</sub> only takes values of the same parity as n, so S<sub>n</sub>/√n lives on a grid of spacing 2/√n. The grid gets finer, the jumps get smaller, and the staircase CDF approaches Φ — convergence in distribution never needed a density.</li>
+  <li><b>Bernoulli without centring does not converge.</b> S<sub>n</sub>/√n has the right variance p(1 − p) but its mean √n p runs off to infinity, so its distance from N(0, 1) tends to 1. Centre and scale it, (S<sub>n</sub> − np)/√(np(1−p)), and it converges just like Rademacher (more slowly when p is far from ½: the skewness enters ρ).</li>
+  <li><b>The simulation cannot see below its own noise.</b> With m attackers, an empirical CDF wobbles around the true one by about 0.87/√m (dashed grey line). Once the true distance drops below that floor, the measured D<sub>n</sub> stops falling: resolving the CLT at size n needs m of order 5n or more.</li>
+</ul>
+
+<h2>7. What the number of attackers m changes</h2>
+<p>Because attackers are independent copies, m does <b>not</b> change the law of any single attacker's score. It changes three other things.</p>
+<h3>7.1 The precision of everything we measure</h3>
+<div style="overflow-x:auto"><table id="prec-table"></table></div>
+<p class="note">All of these shrink like 1/√m: four times as many attackers halve every error bar. A "suitable" m is therefore set by the smallest effect one wants to see — not by n.</p>
+
+<h3>7.2 The strongest attacker</h3>
+<p>A defender rarely cares about the average attacker, but about the best one. If Z<sub>j</sub> = (S<sub>n</sub><sup>(j)</sup> − nμ)/(σ√n) are approximately N(0, 1) by the CLT, the best of m attackers sits at about E[max of m normals] ≈ √(2 ln m) standard deviations above the mean.</p>
+<div id="maxchart"></div>
+<div class="tiles" id="max-tiles"></div>
+<p id="max-text" class="note"></p>
+
+<h3>7.3 All attackers together</h3>
+<p>The pooled score of the whole population, T = S<sub>n</sub><sup>(1)</sup> + … + S<sub>n</sub><sup>(m)</sup>, is itself a sum of m·n i.i.d. increments. Every law above applies to it with n replaced by m·n: its average T/(mn) concentrates at μ with standard deviation σ/√(mn).</p>
+<div class="tiles" id="pool-tiles"></div>
+
+<h2>8. Interpretation: system size and number of attackers</h2>
+<p id="interp-num"></p>
+<ul>
+  <li><b>Larger infrastructures make the breach <i>rate</i> predictable, not the breach <i>count</i>.</b> In the Bernoulli model the number of breached systems grows like np, and its uncertainty grows too, like √(np(1−p)). But the fraction breached concentrates on p with error ~1/√n. A defender of a large estate can forecast the fraction of systems that will fall with good precision; the absolute number keeps a √n margin of error.</li>
+  <li><b>Attackers become indistinguishable in rate, but not in count.</b> As n grows, the spread of S<sub>n</sub>/n across attackers vanishes — every attacker's success rate tends to the same p — while the gap in S<sub>n</sub> between the best and worst attacker widens like √n. On a big network, "how many more systems did the best attacker get" keeps growing even though "how much better is their rate" goes to zero.</li>
+  <li><b>The zero-mean case still produces large individual scores.</b> With Rademacher increments there is no systematic progress (E[S<sub>n</sub>] = 0, S<sub>n</sub>/n → 0), yet a typical attacker ends about √(2/π)·√n ≈ 0.8√n steps away from the start, in one direction or the other, and the trajectories show long excursions. Zero average does not mean that nobody gets far; it means that gains and setbacks balance <i>on average over attackers</i>.</li>
+  <li><b>More attackers raise the worst case, slowly.</b> m does not change any single attacker's distribution, but the strongest of m attackers reaches nμ + σ√n·√(2 ln m) approximately. Doubling the system size n multiplies the extra margin by √2; going from 10 to 1000 attackers only multiplies it by about 2 (the expected maximum grows from 1.54σ to 3.24σ). System size dominates; attacker count enters logarithmically.</li>
+  <li><b>Aggregated over the population, the noise disappears.</b> The pooled breach rate of all m attackers on all n systems has error σ/√(mn): with many attackers and many systems, the aggregate penetration score is essentially deterministic, which is why aggregate statistics (incident counts across a sector) are far more stable than any single organisation's.</li>
+  <li><b>When this breaks.</b> All of the above rests on independence and identical distribution. If systems share a vulnerability, or attackers coordinate, increments become positively correlated: Var(S<sub>n</sub>) grows faster than n, S<sub>n</sub>/n can stay random (e.g. if each attacker has their own skill p<sub>j</sub>, S<sub>n</sub>/n → p<sub>j</sub>, a random limit), and the normal approximation underestimates extreme scores. The i.i.d. model is the baseline against which such dependence is detected.</li>
+</ul>
+
+<h2>9. Summary</h2>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th></th><th>S<sub>n</sub></th><th>S<sub>n</sub>/n</th><th>S<sub>n</sub>/√n</th></tr></thead>
+  <tbody>
+    <tr><td><b>Variance</b></td><td>nσ² — grows</td><td>σ²/n — vanishes</td><td>σ² — constant</td></tr>
+    <tr><td><b>Limit</b></td><td>none (spreads, and drifts if μ ≠ 0)</td><td>the constant μ, in probability (LLN)</td><td>N(0, 1) in distribution for Rademacher (CLT); diverges for Bernoulli unless centred</td></tr>
+    <tr><td><b>In the attack model</b></td><td>how many systems an attacker took; uncertainty grows with the estate</td><td>the attacker's success rate; becomes the same for everybody</td><td>the attacker's "luck" in standard units; the scale on which best and worst attackers are compared</td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer><a href="../hw3/">← HW3</a> · <a href="../">All homework</a> · Simulation: seeded xoshiro128** PRNG, everything computed client-side.</footer>
+</main>
+
+<script src="./sim.js"></script>
+<script src="./plot.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const H = window.HW4;
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = () => ({ s1: css("--s1"), s2: css("--s2"), ok: css("--ok"), bad: css("--bad"), fg: css("--fg"), fg2: css("--fg2"), muted: css("--muted") });
+const f = (v, d = 3) => Number.isFinite(v) ? (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("en") : +v.toFixed(d) + "") : "—";
+const sup = (s) => String(s).replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]);
+let SIM = null, ST = null, MOD = { traj: "bern", cdf: "bern", hist: "bern" };
+
+// ---------- simulation + per-checkpoint statistics ----------
+function analyse(sim) {
+  const { model } = sim;
+  return sim.cp.map((n, c) => {
+    const S = H.column(sim, c), mv = H.meanVar(S);
+    const z = Array.from(S, (v) => (v - n * model.mu) / (model.sd * Math.sqrt(n)));
+    const raw = Array.from(S, (v) => v / Math.sqrt(n));
+    return { n, S, mean: mv.mean, varS: mv.var, varAvg: mv.var / (n * n), varNorm: mv.var / n, z,
+      ksZ: H.ksNormal(z), ksRaw: H.ksNormal(raw), exact: H.exactKS(model, n), be: H.berryEsseen(model, n) };
+  });
+}
+function run() {
+  const p = Math.min(0.99, Math.max(0.01, +$("#p").value || 0.3)); $("#p").value = p;
+  const n = +$("#n").value, m = +$("#m").value, seed = Math.floor(+$("#seed").value) || 1;
+  $("#status").textContent = `Simulating ${m.toLocaleString("en")} attackers × ${n.toLocaleString("en")} systems × 2 models…`;
+  $("#run").disabled = true;
+  setTimeout(() => {
+    const t0 = performance.now();
+    const bern = H.simulate({ model: H.MODELS.bern(p), n, m, seed });
+    const rad = H.simulate({ model: H.MODELS.rad(), n, m, seed: seed + 7919 });
+    SIM = { bern, rad, n, m, p };
+    ST = { bern: analyse(bern), rad: analyse(rad) };
+    const ms = performance.now() - t0;
+    $("#status").innerHTML = `Done: ${(2 * n * m).toLocaleString("en")} increments in ${Math.round(ms)} ms. Checkpoints n = ${bern.cp.join(", ")}.`;
+    $("#run").disabled = false;
+    const last = bern.cp.length - 1;
+    $("#h-n").max = last; $("#c-n").max = last;
+    if (+$("#h-n").value > last) $("#h-n").value = last;
+    $("#c-n").value = Math.min(last, bern.cp.indexOf(100) >= 0 ? bern.cp.indexOf(100) : 2);
+    $("#h-n").value = Math.min(last, bern.cp.indexOf(1000) >= 0 ? bern.cp.indexOf(1000) : last);
+    renderAll();
+  }, 30);
+}
+function renderAll() { if (!SIM) return; trajectories(); cdfs(); hists(); lln(); variance(); clt(); cltDetail(); attackers(); interp(); }
+
+// ---------- 2. trajectories ----------
+function trajectories() {
+  const sim = SIM[MOD.traj], md = sim.model, col = C(), g = sim.grid;
+  const T = sim.paths.length;
+  const layersFor = (tf, band, meanF) => {
+    const L = [{ type: "band", x: g, lo: g.map((k) => band(k)[0]), hi: g.map((k) => band(k)[1]), color: col.s1, opacity: 0.13 }];
+    sim.paths.forEach((P, j) => { if (j) L.push({ type: "line", x: g, y: g.map((k, i) => tf(P[i], k)), color: col.s1, width: 1, opacity: 0.28 }); });
+    L.push({ type: "line", x: g, y: g.map(meanF), color: col.fg, width: 1.4, dash: "5 4" });
+    L.push({ type: "line", x: g, y: g.map((k, i) => tf(sim.paths[0][i], k)), color: col.s2, width: 2.2 });
+    return L;
+  };
+  const leg = [[`${T} attackers`, col.s1], ["attacker #1", col.s2], ["theoretical mean", col.fg, 1], ["±2σ band", col.s1]];
+  plot($("#tr-s"), { title: `Total score Sₖ (${md.name})`, caption: `mean kμ, band kμ ± 2σ√k — the band widens like √k`,
+    legend: leg, layers: layersFor((s) => s, (k) => [k * md.mu - 2 * md.sd * Math.sqrt(k), k * md.mu + 2 * md.sd * Math.sqrt(k)], (k) => k * md.mu),
+    xLabel: "systems attacked k", yLabel: "Sₖ", xMin: 1, height: 250 });
+  plot($("#tr-avg"), { title: `Average score Sₖ / k (${md.name})`, caption: `mean μ, band μ ± 2σ/√k — every path is pulled onto μ (log scale in k)`,
+    layers: layersFor((s, k) => s / k, (k) => [md.mu - 2 * md.sd / Math.sqrt(k), md.mu + 2 * md.sd / Math.sqrt(k)], () => md.mu),
+    xLog: true, xLabel: "systems attacked k (log)", yLabel: "Sₖ / k", yMin: md.key === "bern" ? 0 : -1, yMax: 1, height: 230 });
+  plot($("#tr-norm"), { title: `Normalised score Sₖ / √k (${md.name})`, caption: md.key === "rad"
+      ? "mean 0, band ±2 — the width stays constant: neither spreading nor concentrating"
+      : "mean √k·p, band √k·p ± 2σ — constant width, but the centre drifts upward like √k",
+    layers: layersFor((s, k) => s / Math.sqrt(k), (k) => [Math.sqrt(k) * md.mu - 2 * md.sd, Math.sqrt(k) * md.mu + 2 * md.sd], (k) => Math.sqrt(k) * md.mu),
+    xLog: true, xLabel: "systems attacked k (log)", yLabel: "Sₖ / √k", height: 230 });
+  const last = ST[MOD.traj][ST[MOD.traj].length - 1];
+  const inside = last.z.filter((v) => Math.abs(v) <= 2).length / last.z.length;
+  $("#tr-text").innerHTML = `At n = ${sim.n.toLocaleString("en")}, ${(100 * inside).toFixed(1)} % of all ${sim.m.toLocaleString("en")} attackers lie inside the ±2σ band (normal theory: 95.4 %). ` +
+    `The same paths look like a fan in the first chart, collapse to a line in the second and keep a fixed width in the third: three views of one set of trajectories.`;
+}
+
+// ---------- 3.1 ECDFs ----------
+function ecdf(values, scale) {
+  const a = Float64Array.from(values).sort(), x = [], y = [], m = a.length;
+  let i = 0;
+  x.push(a[0] / scale); y.push(0);
+  while (i < m) {
+    let j = i; while (j < m && a[j] === a[i]) j++;
+    x.push(a[i] / scale); y.push(i / m); x.push(a[i] / scale); y.push(j / m);
+    i = j;
+  }
+  x.push(a[m - 1] / scale); y.push(1);
+  return { x, y };
+}
+function cdfNs(cp) {
+  const pick = cp.filter((n) => [10, 100, 1000, 10000].includes(n));
+  if (!pick.includes(cp[cp.length - 1])) pick.push(cp[cp.length - 1]);
+  return pick.slice(-4);
+}
+function cdfs() {
+  const st = ST[MOD.cdf], md = SIM[MOD.cdf].model, col = C();
+  const ns = cdfNs(SIM[MOD.cdf].cp), cols = [col.muted, col.s1, col.s2, col.ok];
+  const leg = ns.map((n, i) => ["n = " + n.toLocaleString("en"), cols[i]]);
+  const draw = (id, title, cap, scaleF, extra = []) => {
+    const layers = ns.map((n, i) => { const r = st.find((q) => q.n === n); const e = ecdf(r.S, scaleF(n)); return { type: "line", x: e.x, y: e.y, color: cols[i], width: 2 }; });
+    plot($(id), { title, caption: cap, legend: leg, layers: [...extra, ...layers], yMin: 0, yMax: 1, yLabel: "F(x)", height: 220 });
+  };
+  draw("#cdf-s", `CDF of Sₙ (${md.name})`, md.key === "bern" ? "shifts right (drift np) and flattens (spread √n)" : "stays centred at 0 but flattens: the spread grows like √n", () => 1);
+  draw("#cdf-avg", `CDF of Sₙ / n (${md.name})`, `steepens into a vertical step at μ = ${md.mu}: concentration (LLN)`, (n) => n,
+    [{ type: "vline", x: md.mu, color: col.fg2 }]);
+  const phiLine = (() => { const x = [], y = []; for (let t = -4; t <= 4; t += 0.05) { x.push(t); y.push(H.Phi(t)); } return x; })();
+  const extra = md.key === "rad" ? [{ type: "line", x: phiLine, y: phiLine.map(H.Phi), color: col.fg, width: 1.3, dash: "5 4" }] : [];
+  draw("#cdf-norm", `CDF of Sₙ / √n (${md.name})`, md.key === "rad" ? "the curves pile onto Φ (dashed): the shape stops changing (CLT)" : "same width at every n, but the whole curve moves right like √n·p", (n) => Math.sqrt(n), extra);
+  $("#cdf-text").innerHTML = md.key === "rad"
+    ? "Rademacher: Sₙ keeps spreading, Sₙ/n collapses onto 0, and Sₙ/√n converges to the standard normal CDF (dashed). The small staircase at n = 10 is the lattice: Sₙ/√n only takes a few values when n is small."
+    : `Bernoulli: Sₙ moves away and spreads, Sₙ/n becomes a step at p = ${md.mu}, and Sₙ/√n keeps its shape (variance p(1−p)) but slides right without limit. To see the normal limit here it must be centred, (Sₙ − np)/√(np(1−p)) — see section 6.`;
+}
+
+// ---------- 3.2 histograms ----------
+function normalCurve(mean, sd, lo, hi) {
+  const x = [], y = []; const N = 240;
+  for (let i = 0; i <= N; i++) { const t = lo + ((hi - lo) * i) / N; x.push(t); y.push(H.phi((t - mean) / sd) / sd); }
+  return { x, y };
+}
+function hists() {
+  const sim = SIM[MOD.hist], st = ST[MOD.hist], md = sim.model, col = C();
+  const c = +$("#h-n").value, r = st[c], n = r.n;
+  $("#h-nlbl").textContent = "n = " + n.toLocaleString("en");
+  const one = (id, title, scale, mean, sd, xl) => {
+    const h = H.latticeHist(r.S, md, n, scale);
+    const lo = Math.min(h.edges[0], mean - 4 * sd), hi = Math.max(h.edges[h.edges.length - 1], mean + 4 * sd);
+    const nc = normalCurve(mean, sd, lo, hi);
+    plot($(id), { title, legend: [["simulated", col.s1], [`N(${f(mean)}, ${f(sd * sd, 4)})`, col.s2]], height: 210,
+      layers: [{ type: "hist", edges: h.edges, dens: h.dens, color: col.s1, opacity: 0.75,
+        tip: (i) => `[${f(h.edges[i], 4)}, ${f(h.edges[i + 1], 4)}): ${h.counts[i]} attackers` },
+        { type: "line", x: nc.x, y: nc.y, color: col.s2, width: 2.2 }],
+      xMin: lo, xMax: hi, yMin: 0, xLabel: xl, yLabel: "density" });
+  };
+  one("#h-s", `Sₙ at n = ${n.toLocaleString("en")} (${md.name})`, 1, n * md.mu, md.sd * Math.sqrt(n), "Sₙ");
+  one("#h-avg", `Sₙ / n`, n, md.mu, md.sd / Math.sqrt(n), "Sₙ / n");
+  one("#h-norm", `Sₙ / √n`, Math.sqrt(n), Math.sqrt(n) * md.mu, md.sd, "Sₙ / √n");
+  const rows = [["Sₙ", r.mean, n * md.mu, r.varS, n * md.var], ["Sₙ / n", r.mean / n, md.mu, r.varAvg, md.var / n], ["Sₙ / √n", r.mean / Math.sqrt(n), Math.sqrt(n) * md.mu, r.varNorm, md.var]];
+  $("#h-table").innerHTML = `<thead><tr><th>n = ${n.toLocaleString("en")}</th><th class="num">sample mean</th><th class="num">theory</th><th class="num">sample variance</th><th class="num">theory</th></tr></thead><tbody>` +
+    rows.map(([q, a, b, c2, d]) => `<tr><td><b>${q}</b></td><td class="num">${f(a, 4)}</td><td class="num">${f(b, 4)}</td><td class="num">${f(c2, 5)}</td><td class="num">${f(d, 5)}</td></tr>`).join("") + "</tbody>";
+}
+
+// ---------- 4. LLN ----------
+function lln() {
+  const eps = Math.max(0.001, +$("#eps").value || 0.05), col = C();
+  const layers = [], leg = [];
+  [["bern", col.s1], ["rad", col.s2]].forEach(([k, c]) => {
+    const st = ST[k], md = SIM[k].model, ns = st.map((r) => r.n);
+    const emp = st.map((r) => r.S.filter((v) => Math.abs(v / r.n - md.mu) > eps).length / r.S.length);
+    const xs = []; for (let e = 1; e <= Math.log10(SIM.n) + 1e-9; e += 0.02) xs.push(Math.pow(10, e));
+    layers.push({ type: "line", x: xs, y: xs.map((n) => Math.min(1, md.var / (n * eps * eps))), color: c, width: 1.3, dash: "2 4" });
+    layers.push({ type: "line", x: xs, y: xs.map((n) => 2 * (1 - H.Phi((eps * Math.sqrt(n)) / md.sd))), color: c, width: 1.6 });
+    layers.push({ type: "points", x: ns, y: emp, color: c, r: 4.5, tip: (i) => `${md.name}, n = ${ns[i]}: ${(100 * emp[i]).toFixed(2)} % of attackers off by > ε` });
+    leg.push([`${md.name} simulated`, c]);
+    st._emp = emp;
+  });
+  leg.push(["normal approx. (solid) / Chebyshev (dotted)", col.fg2, 1]);
+  plot($("#lln"), { title: `P(|Sₙ/n − μ| > ${eps}) as n grows`, caption: `fraction of the ${SIM.m.toLocaleString("en")} attackers outside the ε-band; Chebyshev capped at 1`,
+    legend: leg, layers, xLog: true, yMin: 0, yMax: 1.02, xMin: 10, xMax: SIM.n, xLabel: "systems n (log)", yLabel: "probability", height: 250 });
+  const mb = SIM.bern.model;
+  const nb = Math.ceil(Math.pow(1.96 * mb.sd / eps, 2)), nr = Math.ceil(Math.pow(1.96 / eps, 2));
+  $("#eps-note").innerHTML = `To get within ±ε with 95 % probability (normal approx.): Bernoulli needs n ≈ ${nb.toLocaleString("en")}, Rademacher n ≈ ${nr.toLocaleString("en")}.`;
+  const lb = ST.bern._emp, lr = ST.rad._emp;
+  $("#lln-text").innerHTML = `Simulated: at n = 10 the probability is ${(100 * lb[0]).toFixed(1)} % (Bernoulli) and ${(100 * lr[0]).toFixed(1)} % (Rademacher); at n = ${SIM.n.toLocaleString("en")} it is ${(100 * lb[lb.length - 1]).toFixed(2)} % and ${(100 * lr[lr.length - 1]).toFixed(2)} %. ` +
+    `The resolution of each point is about 1/m = ${(100 / SIM.m).toFixed(2)} % — an estimate of 0 means "below what ${SIM.m.toLocaleString("en")} attackers can detect", not exactly zero.`;
+}
+
+// ---------- 5. variance ----------
+function variance() {
+  const col = C();
+  const one = (k, id) => {
+    const st = ST[k], md = SIM[k].model, ns = st.map((r) => r.n);
+    const xs = [10, SIM.n];
+    plot($(id), { title: `Variance across attackers — ${md.name}`, caption: `σ² = ${f(md.var, 4)}; log–log axes`,
+      legend: [["Sₙ (slope +1)", col.s1], ["Sₙ / n (slope −1)", col.s2], ["Sₙ / √n (slope 0)", col.ok]],
+      layers: [
+        { type: "line", x: xs, y: xs.map((n) => n * md.var), color: col.s1, width: 1.4 },
+        { type: "line", x: xs, y: xs.map((n) => md.var / n), color: col.s2, width: 1.4 },
+        { type: "line", x: xs, y: xs.map(() => md.var), color: col.ok, width: 1.4 },
+        { type: "points", x: ns, y: st.map((r) => r.varS), color: col.s1, tip: (i) => `Var(Sₙ) at n=${ns[i]}: ${f(st[i].varS, 4)} (theory ${f(ns[i] * md.var, 4)})` },
+        { type: "points", x: ns, y: st.map((r) => r.varAvg), color: col.s2, tip: (i) => `Var(Sₙ/n) at n=${ns[i]}: ${f(st[i].varAvg, 7)} (theory ${f(md.var / ns[i], 7)})` },
+        { type: "points", x: ns, y: st.map((r) => r.varNorm), color: col.ok, tip: (i) => `Var(Sₙ/√n) at n=${ns[i]}: ${f(st[i].varNorm, 4)} (theory ${f(md.var, 4)})` },
+      ], xLog: true, yLog: true, xMin: 10, xMax: SIM.n, xLabel: "systems n (log)", yLabel: "variance (log)", height: 260 });
+  };
+  one("bern", "#var-bern"); one("rad", "#var-rad");
+  // fitted slopes by least squares on log-log
+  const slope = (xs, ys) => { const lx = xs.map(Math.log), ly = ys.map(Math.log), mx = lx.reduce((a, b) => a + b) / lx.length, my = ly.reduce((a, b) => a + b) / ly.length;
+    let num = 0, den = 0; lx.forEach((x, i) => { num += (x - mx) * (ly[i] - my); den += (x - mx) ** 2; }); return num / den; };
+  const row = (k) => { const st = ST[k], ns = st.map((r) => r.n);
+    return [slope(ns, st.map((r) => r.varS)), slope(ns, st.map((r) => r.varAvg)), slope(ns, st.map((r) => r.varNorm)), st.reduce((a, r) => a + r.varNorm, 0) / st.length]; };
+  const b = row("bern"), r = row("rad");
+  $("#var-table").innerHTML = `<thead><tr><th>Fitted log–log slope</th><th class="num">Sₙ (theory +1)</th><th class="num">Sₙ/n (theory −1)</th><th class="num">Sₙ/√n (theory 0)</th><th class="num">mean Var(Sₙ/√n) vs σ²</th></tr></thead><tbody>
+    <tr><td><b>Bernoulli</b></td><td class="num">${b[0].toFixed(3)}</td><td class="num">${b[1].toFixed(3)}</td><td class="num">${b[2].toFixed(3)}</td><td class="num">${b[3].toFixed(4)} vs ${f(SIM.bern.model.var, 4)}</td></tr>
+    <tr><td><b>Rademacher</b></td><td class="num">${r[0].toFixed(3)}</td><td class="num">${r[1].toFixed(3)}</td><td class="num">${r[2].toFixed(3)}</td><td class="num">${r[3].toFixed(4)} vs 1</td></tr></tbody>`;
+}
+
+// ---------- 6. CLT ----------
+function clt() {
+  const col = C(), rs = ST.rad, bs = ST.bern, ns = rs.map((r) => r.n);
+  const xs = []; for (let e = 1; e <= Math.log10(SIM.n) + 1e-9; e += 0.05) xs.push(Math.pow(10, e));
+  const floor = 0.8687 / Math.sqrt(SIM.m);
+  plot($("#ks"), { title: "Distance from N(0, 1): sup |Fₙ − Φ|", caption: "points = simulated m attackers, solid lines = exact from the binomial law, log–log axes",
+    legend: [["Rademacher Sₙ/√n", col.s1], ["Bernoulli standardised", col.s2], ["Bernoulli raw Sₙ/√n", col.bad], ["Berry–Esseen bound (Rademacher)", col.fg2, 1], ["noise floor ≈ 0.87/√m", col.muted, 1]],
+    layers: [
+      { type: "line", x: ns, y: rs.map((r) => r.exact), color: col.s1, width: 1.6 },
+      { type: "line", x: ns, y: bs.map((r) => r.exact), color: col.s2, width: 1.6 },
+      { type: "line", x: xs, y: xs.map((n) => 0.4748 / Math.sqrt(n)), color: col.fg2, width: 1.3, dash: "5 4" },
+      { type: "hline", y: floor, color: col.muted },
+      { type: "points", x: ns, y: rs.map((r) => r.ksZ), color: col.s1, tip: (i) => `Rademacher n=${ns[i]}: simulated ${rs[i].ksZ.toFixed(4)}, exact ${rs[i].exact.toFixed(4)}, bound ${rs[i].be.toFixed(4)}` },
+      { type: "points", x: ns, y: bs.map((r) => r.ksZ), color: col.s2, tip: (i) => `Bernoulli standardised n=${ns[i]}: simulated ${bs[i].ksZ.toFixed(4)}, exact ${bs[i].exact.toFixed(4)}` },
+      { type: "points", x: ns, y: bs.map((r) => r.ksRaw), color: col.bad, r: 3.5, tip: (i) => `Bernoulli raw Sₙ/√n n=${ns[i]}: ${bs[i].ksRaw.toFixed(4)}` },
+    ], xLog: true, yLog: true, xMin: 10, xMax: SIM.n, yMin: 0.001, yMax: 1, xLabel: "systems n (log)", yLabel: "KS distance (log)", height: 280 });
+  const nRes = Math.round(Math.pow(0.4 / floor, 2));
+  const last = rs[rs.length - 1];
+  $("#ks-text").innerHTML = `Rademacher at n = ${last.n.toLocaleString("en")}: exact distance ${last.exact.toFixed(4)} ≤ Berry–Esseen ${last.be.toFixed(4)}, while the simulated one is ${last.ksZ.toFixed(4)} — stuck near the noise floor ${floor.toFixed(4)} of m = ${SIM.m.toLocaleString("en")} attackers. ` +
+    `With this m the CLT approach is resolved only up to n ≈ ${nRes.toLocaleString("en")}; beyond that, more attackers are needed to see it. Bernoulli raw Sₙ/√n reaches distance ${bs[bs.length - 1].ksRaw.toFixed(3)} from N(0, 1): no convergence without centring.`;
+}
+function cltDetail() {
+  const col = C(), c = +$("#c-n").value, r = ST.rad[c], b = ST.bern[c], n = r.n, md = SIM.bern.model;
+  $("#c-nlbl").textContent = "n = " + n.toLocaleString("en");
+  const e = ecdf(r.S, Math.sqrt(n));
+  const tx = []; for (let t = -3.5; t <= 3.5; t += 0.02) tx.push(t);
+  plot($("#clt-ecdf"), { title: `Rademacher Sₙ/√n vs Φ, n = ${n.toLocaleString("en")}`, caption: `staircase on a grid of step 2/√n = ${f(2 / Math.sqrt(n), 4)}; distance ${r.ksZ.toFixed(4)}`,
+    legend: [["empirical CDF", col.s1], ["Φ", col.s2]],
+    layers: [{ type: "line", x: tx, y: tx.map(H.Phi), color: col.s2, width: 2.4 }, { type: "line", x: e.x, y: e.y, color: col.s1, width: 1.6 }],
+    xMin: -3.5, xMax: 3.5, yMin: 0, yMax: 1, xLabel: "Sₙ / √n", yLabel: "F(x)", height: 240 });
+  const h = H.latticeHist(b.S, md, n, Math.sqrt(n), 30);
+  const mean = Math.sqrt(n) * md.mu, lo = Math.min(-3.5, h.edges[0]), hi = Math.max(mean + 3.5 * md.sd, h.edges[h.edges.length - 1]);
+  const n01 = normalCurve(0, 1, lo, hi), nm = normalCurve(mean, md.sd, lo, hi);
+  plot($("#clt-bern"), { title: `Bernoulli Sₙ/√n, n = ${n.toLocaleString("en")}`, caption: `centred at √n·p = ${f(mean)}, not at 0`,
+    legend: [["simulated", col.s1], ["N(0, 1)", col.fg2, 1], [`N(√n p, p(1−p))`, col.s2]],
+    layers: [{ type: "hist", edges: h.edges, dens: h.dens, color: col.s1, opacity: 0.7, tip: (i) => `${h.counts[i]} attackers` },
+      { type: "line", x: n01.x, y: n01.y, color: col.fg2, width: 1.6, dash: "5 4" },
+      { type: "line", x: nm.x, y: nm.y, color: col.s2, width: 2 }],
+    xMin: lo, xMax: hi, yMin: 0, xLabel: "Sₙ / √n", yLabel: "density", height: 240 });
+}
+
+// ---------- 7. attackers ----------
+function attackers() {
+  const col = C(), m = SIM.m, ks = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000].filter((k) => k <= m / 4);
+  const xs = []; for (let e = 0; e <= Math.log10(m) + 1e-9; e += 0.05) xs.push(Math.pow(10, e));
+  const exp = xs.map((k) => H.expMaxNormal(Math.max(1, Math.round(k))));
+  const layers = [{ type: "line", x: xs, y: exp, color: col.fg, width: 1.6 },
+    { type: "line", x: xs, y: xs.map((k) => Math.sqrt(2 * Math.log(k))), color: col.fg2, width: 1.3, dash: "5 4" }];
+  [["bern", col.s1], ["rad", col.s2]].forEach(([k, c]) => {
+    const z = ST[k][ST[k].length - 1].z, ys = ks.map((q) => H.blockMax(z, q).mean);
+    layers.push({ type: "points", x: ks, y: ys, color: c, tip: (i) => `${SIM[k].model.name}: best of ${ks[i]} attackers ≈ ${ys[i].toFixed(3)} σ above the mean` });
+  });
+  plot($("#maxchart"), { title: "How far above the mean is the best of k attackers?", caption: `standardised final score Zⱼ at n = ${SIM.n.toLocaleString("en")}, averaged over disjoint groups of k attackers`,
+    legend: [["Bernoulli", col.s1], ["Rademacher", col.s2], ["E[max of k N(0,1)] (exact)", col.fg], ["√(2 ln k)", col.fg2, 1]],
+    layers, xLog: true, xMin: 1, xMax: m, yMin: 0, xLabel: "number of attackers k (log)", yLabel: "best score (σ units)", height: 250 });
+
+  const md = SIM.bern.model, n = SIM.n, last = ST.bern[ST.bern.length - 1];
+  const sdS = md.sd * Math.sqrt(n), em = H.expMaxNormal(m);
+  let mx = -Infinity, mn = Infinity; for (const v of last.S) { if (v > mx) mx = v; if (v < mn) mn = v; }
+  $("#max-tiles").innerHTML = `
+    <div class="tile"><div class="lbl">Average attacker breaches (np)</div><div class="v">${f(n * md.mu, 1)}</div><div class="lbl">of ${n.toLocaleString("en")} systems</div></div>
+    <div class="tile"><div class="lbl">Best of ${m.toLocaleString("en")}, predicted np + σ√n·E[max]</div><div class="v o">${f(n * md.mu + sdS * em, 1)}</div><div class="lbl">E[max] = ${em.toFixed(2)} σ</div></div>
+    <div class="tile"><div class="lbl">Best of ${m.toLocaleString("en")}, simulated</div><div class="v o">${mx.toLocaleString("en")}</div><div class="lbl">worst: ${mn.toLocaleString("en")}</div></div>
+    <div class="tile"><div class="lbl">Best attacker's rate vs p</div><div class="v">${(mx / n).toFixed(4)}</div><div class="lbl">p = ${md.mu}</div></div>`;
+  $("#max-text").innerHTML = `Bernoulli, p = ${md.mu}: the best attacker beats the average by about ${f(sdS * em, 1)} systems (${em.toFixed(2)} standard deviations of ${f(sdS, 2)}), yet their success <i>rate</i> differs from p only by ${f((mx / n - md.mu), 4)}. ` +
+    `The gap in systems grows like √n; the gap in rate shrinks like 1/√n.`;
+
+  // precision table
+  const r = ST.rad, nn = SIM.n;
+  const P = 0.05;
+  $("#prec-table").innerHTML = `<thead><tr><th>Estimate from m attackers</th><th>Standard error</th><th class="num">with m = ${m.toLocaleString("en")}</th></tr></thead><tbody>
+    <tr><td>Mean of Sₙ/n (Bernoulli)</td><td>σ / (√n·√m)</td><td class="num">${f(md.sd / Math.sqrt(nn * m), 6)} at n = ${nn.toLocaleString("en")}</td></tr>
+    <tr><td>Variance of Sₙ/√n</td><td>≈ σ²·√(2/m)</td><td class="num">±${(100 * Math.sqrt(2 / m)).toFixed(1)} % relative</td></tr>
+    <tr><td>A probability such as P(|Sₙ/n − μ| &gt; ε) ≈ ${P}</td><td>√(P(1−P)/m)</td><td class="num">±${(100 * Math.sqrt(P * (1 - P) / m)).toFixed(2)} points</td></tr>
+    <tr><td>KS distance to Φ (noise floor)</td><td>≈ 0.87 / √m</td><td class="num">${(0.8687 / Math.sqrt(m)).toFixed(4)}</td></tr>
+    <tr><td>Largest n whose CLT error 0.4/√n is still visible</td><td>n ≲ (0.4·√m / 0.87)²</td><td class="num">≈ ${Math.round(Math.pow(0.4 * Math.sqrt(m) / 0.8687, 2)).toLocaleString("en")}</td></tr></tbody>`;
+
+  // pooled
+  const pool = (k) => { const s = ST[k][ST[k].length - 1].S; let t = 0; for (const v of s) t += v; return t; };
+  const tb = pool("bern"), tr = pool("rad"), N = m * n;
+  $("#pool-tiles").innerHTML = `
+    <div class="tile"><div class="lbl">Total increments m·n</div><div class="v">${N.toLocaleString("en")}</div></div>
+    <div class="tile"><div class="lbl">Bernoulli pooled rate T/(mn)</div><div class="v">${(tb / N).toFixed(5)}</div><div class="lbl">p = ${md.mu} ± ${(1.96 * md.sd / Math.sqrt(N)).toFixed(5)} (95 %)</div></div>
+    <div class="tile"><div class="lbl">Rademacher pooled T/(mn)</div><div class="v o">${(tr / N).toFixed(5)}</div><div class="lbl">0 ± ${(1.96 / Math.sqrt(N)).toFixed(5)} (95 %)</div></div>
+    <div class="tile"><div class="lbl">Rademacher pooled T/√(mn)</div><div class="v o">${(tr / Math.sqrt(N)).toFixed(3)}</div><div class="lbl">one draw of ≈ N(0, 1)</div></div>`;
+}
+
+// ---------- 8. numbers for the interpretation ----------
+function interp() {
+  const md = SIM.bern.model, n = SIM.n, m = SIM.m;
+  const sdS = md.sd * Math.sqrt(n);
+  $("#interp-num").innerHTML = `<b>With the current run</b> (p = ${md.mu}, n = ${n.toLocaleString("en")} systems, m = ${m.toLocaleString("en")} attackers): a typical attacker breaches ${f(n * md.mu, 0)} ± ${f(1.96 * sdS, 0)} systems (95 %), i.e. a fraction ${md.mu} ± ${(1.96 * md.sd / Math.sqrt(n)).toFixed(4)}. ` +
+    `On 100 systems the same attacker would breach ${f(100 * md.mu, 0)} ± ${f(1.96 * md.sd * 10, 0)}, a fraction ${md.mu} ± ${(1.96 * md.sd / 10).toFixed(3)}: ${Math.round(Math.sqrt(n / 100))} times more uncertain in rate, ${Math.round(Math.sqrt(n / 100))} times less in count. In the Rademacher model a typical attacker ends ≈ ${f(Math.sqrt(2 / Math.PI) * Math.sqrt(n), 0)} steps from the start.`;
+}
+
+// ---------- wiring ----------
+function seg(id, key, fn) {
+  $(id).addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    $(id).querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+    MOD[key] = b.dataset.m; if (SIM) fn();
+  });
+}
+seg("#traj-model", "traj", trajectories); seg("#cdf-model", "cdf", cdfs); seg("#h-model", "hist", hists);
+$("#h-n").addEventListener("input", () => SIM && hists());
+$("#c-n").addEventListener("input", () => SIM && cltDetail());
+$("#eps").addEventListener("input", () => SIM && lln());
+$("#run").onclick = run;
+$("#reseed").onclick = () => { $("#seed").value = 1 + Math.floor(Math.random() * 1e6); run(); };
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
+run();
+</script>
+</body>
+</html>

@@ -183,7 +183,7 @@
   <li><b>From the toy design itself.</b> Even with a large d, this toy would be weak for other reasons, and it is worth separating them: (i) the mask is only <b>8 bits</b> (S.x mod 256), so each character has just 256 possible masks — a frequency attack on the <i>masked bytes</i> across a long message becomes possible, independent of the key; (ii) the group is tiny, so points repeat and the "hash" S.x is far from uniform; (iii) there is no integrity check, so ciphertext can be tampered with. Real ECIES fixes these with a proper KDF, a full-size symmetric cipher, and a MAC. These are <i>design</i> weaknesses, present even before the key space is restricted — a useful contrast with Caesar, whose weakness is entirely structural and cannot be patched by a bigger key.</li>
 </ul>
 
-<footer><a href="../hw2/">← HW2</a> · <a href="../">All homework</a> · Corpus: Project Gutenberg (public domain) via the NLTK Gutenberg selection.</footer>
+<footer><a href="../hw2/">← HW2</a> · <a href="../">All homework</a> · <a href="../hw4/">HW4 →</a> · Corpus: Project Gutenberg (public domain) via the NLTK Gutenberg selection.</footer>
 </main>
 
 <script src="../assets/charts.js"></script>
