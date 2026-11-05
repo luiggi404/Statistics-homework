@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HW5 · Welford, sampling mean and variance</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; margin:12px 0; }
+  .tile { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--panel); }
+  .tile .lbl { font-size:.78rem; color:var(--fg2); }
+  .tile .v { font-size:1.3rem; font-weight:700; font-variant-numeric:tabular-nums; color:var(--s1); }
+  .tile .v.o { color:var(--s2); }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .seg button { border-radius:0; background:var(--bg); color:var(--fg); border:none; font-weight:500; padding:6px 14px; }
+  .seg button.on { background:var(--s1); color:#fff; font-weight:600; }
+  .legend span.dash::before { height:0; width:16px; border-top:2px dashed var(--c); background:none; border-radius:0; vertical-align:3px; }
+  .formula { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:.9rem; background:var(--code); padding:10px 14px; border-radius:8px; overflow-x:auto; white-space:pre; line-height:1.7; margin:10px 0; }
+  .formula b { color:var(--s1); }
+  #status { min-height:1.4em; }
+  .kv { font-variant-numeric: tabular-nums; }
+  .slider-row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .slider-row input[type=range] { flex:1; min-width:160px; }
+  textarea { font: .9rem ui-monospace, Menlo, Consolas, monospace; width:100%; min-height:56px; color:var(--fg); background:var(--bg);
+    border:1px solid var(--line); border-radius:6px; padding:8px 10px; resize:vertical; }
+  .codegrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+  .codegrid pre { margin:0; }
+  .codegrid .lbl { font-size:.78rem; color:var(--fg2); margin:0 0 4px; }
+  td.ok { color:var(--ok); font-weight:600; } td.bad { color:var(--bad); font-weight:600; }
+  ol.steps li { margin:6px 0; }
+  th { text-transform:none; letter-spacing:0; font-size:.82rem; }
+  pre code { background:none; padding:0; }
+</style>
+</head>
+<body>
+<main>
+<p class="crumb"><a href="../">Statistics Homework</a> / HW5</p>
+<h1>HW5 — Welford's recurrences and the sampling mean and variance</h1>
+<p class="sub">Exercise 1 derives a one-pass, numerically stable update for the mean, the sum of squares and the variance. Exercise 2 gives every penetration attempt a score from 0 to 10, runs that update along each hacker's trajectory, and checks the estimates against the true μ and σ² for growing n.</p>
+
+<div class="def"><b>What this page is about.</b> A <i>statistic</i> computed from data (the sample mean, the sample variance) is itself a random variable: run the experiment again and you get a different value. Its distribution over repetitions is the <i>sampling distribution</i>. Here every hacker is one repetition. Averaging a statistic over many hackers tells us whether it is right <i>on average</i> (bias); its spread across hackers tells us how far a single value can be trusted (variance). Both are exactly what inferential statistics needs to go from one sample to a statement about the population.</div>
+
+<!-- ======================================================================= -->
+<h2>Exercise 1 — Welford's recurrence formulas</h2>
+
+<h3>1.1 Starting point: Knuth's recurrence for the mean</h3>
+<div class="def"><b>Definition.</b> Given observations x<sub>1</sub>, x<sub>2</sub>, …, the <i>running mean</i> after k of them is M<sub>k</sub> = (x<sub>1</sub> + … + x<sub>k</sub>)/k. A <i>recurrence</i> computes M<sub>k</sub> from M<sub>k−1</sub> and the new value x<sub>k</sub> alone, so the data never has to be stored or re-read.</div>
+<p>Write the sum in two ways: k·M<sub>k</sub> = (k−1)·M<sub>k−1</sub> + x<sub>k</sub>. Dividing by k and rearranging:</p>
+<div class="formula">M<sub>k</sub> = ((k−1)·M<sub>k−1</sub> + x<sub>k</sub>) / k = M<sub>k−1</sub> + (x<sub>k</sub> − M<sub>k−1</sub>) / k,        M<sub>0</sub> = 0</div>
+<p>The update is "old mean + (surprise of the new point) / k". The two facts it rests on, and that we will reuse, are</p>
+<div class="formula">(a)  k·M<sub>k</sub> = (k−1)·M<sub>k−1</sub> + x<sub>k</sub>
+(b)  k·(M<sub>k</sub> − M<sub>k−1</sub>) = x<sub>k</sub> − M<sub>k−1</sub></div>
+
+<h3>1.2 The same idea for the sum of squares</h3>
+<div class="def"><b>Definition.</b> The <i>sum of squares</i> (of deviations from the mean) of the first k observations is SS<sub>k</sub> = Σ<sub>i=1..k</sub> (x<sub>i</sub> − M<sub>k</sub>)². It measures the total spread around the current mean; the variance is SS divided by k (population form) or by k−1 (sample form).</div>
+<p>The difficulty compared with the mean: when x<sub>k</sub> arrives the mean moves, so <i>every</i> old deviation x<sub>i</sub> − M<sub>k−1</sub> changes. We need the net effect of that shift in closed form. Expanding the square gives the algebraic identity SS<sub>k</sub> = Σ x<sub>i</sub>² − k·M<sub>k</sub>², used here only to find the increment:</p>
+<ol class="steps">
+  <li>Subtract the identity at k−1 from the identity at k; the old x<sub>i</sub>² cancel:
+    <div class="formula">SS<sub>k</sub> − SS<sub>k−1</sub> = x<sub>k</sub>² − k·M<sub>k</sub>² + (k−1)·M<sub>k−1</sub>²</div></li>
+  <li>By (a), (k−1)·M<sub>k−1</sub> = k·M<sub>k</sub> − x<sub>k</sub>, so (k−1)·M<sub>k−1</sub>² = M<sub>k−1</sub>·(k·M<sub>k</sub> − x<sub>k</sub>):
+    <div class="formula">SS<sub>k</sub> − SS<sub>k−1</sub> = x<sub>k</sub>² − x<sub>k</sub>·M<sub>k−1</sub> − k·M<sub>k</sub>·(M<sub>k</sub> − M<sub>k−1</sub>)</div></li>
+  <li>By (b), k·(M<sub>k</sub> − M<sub>k−1</sub>) = x<sub>k</sub> − M<sub>k−1</sub>, so the last term is M<sub>k</sub>·(x<sub>k</sub> − M<sub>k−1</sub>):
+    <div class="formula">SS<sub>k</sub> − SS<sub>k−1</sub> = x<sub>k</sub>·(x<sub>k</sub> − M<sub>k−1</sub>) − M<sub>k</sub>·(x<sub>k</sub> − M<sub>k−1</sub>)</div></li>
+</ol>
+<p>Collecting the common factor gives <b>Welford's recurrence</b>:</p>
+<div class="formula"><b>SS<sub>k</sub> = SS<sub>k−1</sub> + (x<sub>k</sub> − M<sub>k−1</sub>)·(x<sub>k</sub> − M<sub>k</sub>)</b>,        SS<sub>0</sub> = 0</div>
+<p>It has the same shape as Knuth's: old value plus a correction that uses only the new point and the two means. The correction is the product of the deviation of x<sub>k</sub> from the <i>old</i> mean and from the <i>new</i> mean — both are known at step k, and both have the same sign (M<sub>k</sub> lies between M<sub>k−1</sub> and x<sub>k</sub>), so SS can only grow, as a sum of squares must.</p>
+<p>Using x<sub>k</sub> − M<sub>k</sub> = (x<sub>k</sub> − M<sub>k−1</sub>) − (M<sub>k</sub> − M<sub>k−1</sub>) = (x<sub>k</sub> − M<sub>k−1</sub>)·(k−1)/k, an equivalent form with a single deviation δ = x<sub>k</sub> − M<sub>k−1</sub> is</p>
+<div class="formula">SS<sub>k</sub> = SS<sub>k−1</sub> + δ²·(k−1)/k</div>
+
+<h3>1.3 The recurrence for the variance</h3>
+<div class="def"><b>Definition.</b> The <i>sample variance</i> is s<sub>k</sub>² = SS<sub>k</sub>/(k−1) (k ≥ 2); the <i>population</i> (or biased) variance is σ̂<sub>k</sub>² = SS<sub>k</sub>/k. Exercise 2 shows why the k−1 divisor is the right one for estimation.</div>
+<p>Dividing the second form of Welford's recurrence by k−1, and writing SS<sub>k−1</sub> = (k−2)·s<sub>k−1</sub>²:</p>
+<div class="formula"><b>s<sub>k</sub>² = ((k−2)/(k−1))·s<sub>k−1</sub>² + (x<sub>k</sub> − M<sub>k−1</sub>)² / k</b>,        k ≥ 2  (s<sub>1</sub>² is undefined, its coefficient is 0)</div>
+<p>and dividing by k instead, for the population variance, in the "old + correction / k" form of Knuth's mean:</p>
+<div class="formula"><b>σ̂<sub>k</sub>² = σ̂<sub>k−1</sub>² + ((x<sub>k</sub> − M<sub>k−1</sub>)·(x<sub>k</sub> − M<sub>k</sub>) − σ̂<sub>k−1</sub>²) / k</b>,        σ̂<sub>0</sub>² = 0</div>
+<p>In practice one keeps SS as the state and divides only when the variance is needed: it avoids the special case at k = 1 and costs nothing.</p>
+
+<h3>1.4 The code</h3>
+<p>The core is three lines: compute the deviation from the old mean, update the mean (Knuth), update SS with the product of the old and new deviations (Welford).</p>
+<div class="codegrid">
+<div><p class="lbl">JavaScript — the exact lines used in the simulation below</p>
+<pre><code>const d = x - mean;       // x_k − M_{k−1}
+mean += d / k;            // M_k   (Knuth)
+ss   += d * (x - mean);   // SS_k  (Welford)</code></pre></div>
+<div><p class="lbl">Python</p>
+<pre><code>d = x - mean
+mean += d / k
+ss += d * (x - mean)</code></pre></div>
+</div>
+<p>Wrapped into a streaming accumulator:</p>
+<pre><code>def welford(stream):
+    k, mean, ss = 0, 0.0, 0.0
+    for x in stream:
+        k += 1
+        d = x - mean
+        mean += d / k
+        ss += d * (x - mean)
+    return mean, ss / (k - 1), ss / k      # mean, sample variance, population variance</code></pre>
+
+<h3>1.5 Trying it, and why not the textbook formula</h3>
+<p>Type any list of numbers. The table runs the three lines one observation at a time.</p>
+<div class="panel">
+  <div class="controls" style="flex-direction:column;align-items:stretch">
+    <label>Data (comma or space separated) <textarea id="e1-data">7, 3, 9, 4, 6, 10, 2, 5</textarea></label>
+    <div class="controls">
+      <button id="e1-run">Run Welford</button>
+      <button class="ghost" data-pre="7, 3, 9, 4, 6, 10, 2, 5">Scores</button>
+      <button class="ghost" data-pre="4, 7, 13, 16">Knuth's example</button>
+      <button class="ghost" data-pre="1000000004, 1000000007, 1000000013, 1000000016">Same + 10⁹</button>
+      <button class="ghost" data-pre="rand">20 random scores</button>
+    </div>
+  </div>
+</div>
+<div class="scroll"><table id="e1-table"></table></div>
+<p id="e1-res" class="result kv" style="margin-top:12px"></p>
+
+<p><b>Why a recurrence instead of Σx² − (Σx)²/n?</b> The "one-pass textbook" formula SS = Σx<sub>i</sub>² − (Σx<sub>i</sub>)²/n is exact algebra but disastrous arithmetic: when the mean is large compared with the spread, it subtracts two huge, nearly equal numbers and loses all significant digits (<i>catastrophic cancellation</i>). The two-pass formula Σ(x<sub>i</sub> − x̄)² is accurate but has to read the data twice. Welford reads it once <i>and</i> only ever handles deviations from the current mean, which are of the size of the spread, not of the data. Below, the data above is shifted by a growing constant c: the true variance does not change.</p>
+<div style="overflow-x:auto"><table id="e1-cancel"></table></div>
+<p class="note">All computations in IEEE-754 double precision (53-bit mantissa, about 16 significant digits). Once Σx² exceeds 2⁵³ ≈ 9·10¹⁵, the spacing between representable doubles exceeds 1, and the textbook formula can even return a negative variance. At c = 10¹² Welford also drifts slightly: there the <i>input numbers themselves</i> can only be stored to about 10⁻⁴, so no algorithm can recover more digits; the error comes from the data, not from the recurrence.</p>
+
+<!-- ======================================================================= -->
+<h2>Exercise 2 — Sampling mean and variance of the penetration scores</h2>
+
+<h3>2.0 The model</h3>
+<div class="def"><b>Definition.</b> Each penetration attempt receives a <i>score</i> X ∈ {0, 1, …, 10} drawn from a fixed probability mass function p(k) = P(X = k). Its theoretical mean is μ = Σ k·p(k) and its variance σ² = Σ (k − μ)²·p(k). The scores of all attempts are independent and identically distributed (i.i.d.).</div>
+<p><b>How hackers and systems enter.</b> As in HW4, each of the m hackers attempts the n systems in order and gets one score per system: a trajectory X<sub>1</sub>, …, X<sub>n</sub>. Hacker j runs Welford's recurrence along their own trajectory and ends with a sampling mean x̄<sub>j</sub> = M<sub>n</sub> and a sampling variance s<sub>j</sub>² = SS<sub>n</sub>/(n−1). The m hackers are m independent repetitions of the same experiment, so the m values x̄<sub>1</sub>, …, x̄<sub>m</sub> are a sample from the sampling distribution of x̄ (and likewise for s²).</p>
+<p>The default choice is <b>Binomial(10, p)</b>: an attempt is 10 independent stages, each passed with probability p, and the score is the number of stages passed. It extends HW4 directly (p = 0.3 there too), with μ = 10p and σ² = 10p(1 − p). Three other distributions are available to show which conclusions depend on the shape and which do not.</p>
+
+<div class="panel">
+  <div class="controls">
+    <label>Distribution
+      <select id="dist">
+        <option value="binom" selected>Binomial(10, p)</option>
+        <option value="unif">Uniform{0…10}</option>
+        <option value="geom">Truncated geometric (skewed)</option>
+        <option value="bimodal">Bimodal (all-or-nothing)</option>
+      </select></label>
+    <label id="p-lbl">p <input id="p" type="number" min="0.05" max="0.95" step="0.05" value="0.3"></label>
+    <label>Systems n (max)
+      <select id="N"><option value="100">100</option><option value="1000" selected>1 000</option><option value="10000">10 000</option></select></label>
+    <label>Hackers m
+      <select id="m"><option value="200">200</option><option value="1000">1 000</option><option value="2000" selected>2 000</option><option value="5000">5 000</option></select></label>
+    <label>Seed <input id="seed" type="number" value="42"></label>
+    <button id="run">Simulate</button>
+    <button id="reseed" class="ghost">New seed</button>
+  </div>
+  <p id="status" class="note" style="margin-bottom:0"></p>
+</div>
+<p class="note" id="story"></p>
+<div class="grid2">
+  <div id="pmf"></div>
+  <div class="tiles" id="dist-tiles" style="align-content:start"></div>
+</div>
+<p class="note">Every hacker is observed at n = 2, 5, 10, 20, 50, … up to the maximum: "repeating the experiment for different n" means reading the Welford state of the same hackers after more systems. Results at different n are therefore correlated with each other, while hackers are independent of each other. The generator is seeded (xoshiro128**, shared with HW4).</p>
+
+<h3>2.1 What theory predicts</h3>
+<div class="def"><b>Definitions.</b> An estimator θ̂ of a parameter θ is <i>unbiased</i> if E[θ̂] = θ: averaged over infinitely many repetitions it hits the target. Its <i>standard error</i> is its standard deviation √Var(θ̂). It is <i>consistent</i> if θ̂ → θ in probability as the sample size grows.</div>
+<p><b>Sampling mean.</b> By linearity, E[x̄] = μ. By independence, Var(x̄) = σ²/n. So x̄ is unbiased and its standard error is σ/√n.</p>
+<p><b>Sampling variance.</b> Using SS = Σx<sub>i</sub>² − n·x̄², E[X²] = σ² + μ² and E[x̄²] = σ²/n + μ²:</p>
+<div class="formula">E[SS] = n(σ² + μ²) − n(σ²/n + μ²) = (n − 1)·σ²
+⇒  E[s²] = E[SS/(n−1)] = σ²        E[σ̂²] = E[SS/n] = σ²·(n−1)/n</div>
+<p>One degree of freedom is "used up" by measuring deviations from x̄ instead of from the unknown μ: the data are always closer to their own mean than to μ, so SS underestimates the spread by exactly one σ². Dividing by n − 1 corrects this; dividing by n leaves a bias of −σ²/n.</p>
+<p>The spread of s² depends on the fourth central moment μ<sub>4</sub> = E[(X − μ)⁴], i.e. on the tails of the score distribution:</p>
+<div class="formula">Var(s²) = ( μ<sub>4</sub> − σ⁴·(n−3)/(n−1) ) / n  ≈  σ⁴·(κ − 1)/n        κ = μ<sub>4</sub>/σ⁴ (kurtosis)
+Cov(x̄, s²) = μ<sub>3</sub>/n        μ<sub>3</sub> = E[(X − μ)³] (zero for symmetric scores)</div>
+<p><b>Averages over the m hackers.</b> The average of the m sampling means, (1/m)·Σ x̄<sub>j</sub>, has mean μ and standard error σ/√(nm); the average of the m sampling variances has mean σ² and standard error √(Var(s²)/m). These standard errors are the yardstick for "close": a difference of a couple of standard errors is noise, a difference of many is bias.</p>
+
+<h3>2.2 Each hacker's running estimates</h3>
+<p>Because Welford is a recurrence, every hacker has a running mean M<sub>k</sub> and a running variance s<sub>k</sub>² after every system, not just at the end. The first hackers' paths, with the true value (dashed) and the ±2 standard-error band of section 2.1 (shaded); one hacker is highlighted.</p>
+<div id="run-mean"></div>
+<div id="run-var"></div>
+<p id="run-text" class="note"></p>
+
+<h3>2.3 Average of the estimates across the m hackers vs μ and σ²</h3>
+<div id="avg-mean"></div>
+<div id="avg-var"></div>
+<div style="overflow-x:auto"><table id="avg-table"></table></div>
+<p class="note">"z" is (average − true value) / standard error of the average. If the estimator is unbiased, z behaves like a draw from N(0, 1): |z| &lt; 2 about 95 % of the time. For SS/n the z is against σ², to show the size of the bias in units of the noise.</p>
+
+<h3>2.4 How n changes the variability of the estimates</h3>
+<p>Variance across the m hackers of the sampling mean and of the sampling variance (points), against the theory of section 2.1 (lines), on log–log axes where a slope of −1 means "proportional to 1/n".</p>
+<div id="v-xbar"></div>
+<div id="v-s2"></div>
+<div style="overflow-x:auto"><table id="v-table"></table></div>
+
+<h3>2.5 The sampling distributions at one n</h3>
+<div class="panel"><div class="slider-row"><span class="note">n =</span><input id="h-n" type="range" min="0" max="8" value="2"><b id="h-nlbl" class="kv"></b></div></div>
+<div id="h-xbar"></div>
+<div id="h-s2"></div>
+<div id="scatter"></div>
+<p id="h-text" class="note"></p>
+
+<h3>2.6 Using the estimates for inference: confidence intervals</h3>
+<p>The practical reason to care about x̄ and s²: from <i>one</i> hacker's n scores, without knowing μ or σ, one can build the 95 % interval x̄ ± t<sub>n−1</sub>·s/√n. Each hacker builds their own; the fraction of hackers whose interval contains the true μ is the <i>empirical coverage</i>, which should be 95 %. The same with the normal quantile 1.96 instead of Student's t shows what ignoring the uncertainty in s costs.</p>
+<div id="cov"></div>
+<div style="overflow-x:auto"><table id="cov-table"></table></div>
+
+<h2>3. Conclusions</h2>
+<p id="concl-num"></p>
+<h3>What the comparisons show</h3>
+<ul>
+  <li><b>The average of the sampling means matches μ at every n</b>, from n = 2 upward, within its standard error. x̄ is unbiased regardless of n and regardless of the shape of the score distribution: unbiasedness needs only linearity of expectation.</li>
+  <li><b>The average of the sampling variances (n − 1 divisor) matches σ² at every n</b>, again within its standard error and for every distribution. Dividing SS by n instead gives averages that sit visibly below σ², by the predicted factor (n − 1)/n: halved at n = 2, 10 % low at n = 10, negligible only for large n. This is the experimental proof that n − 1 is the correct divisor.</li>
+  <li><b>Unbiased does not mean accurate for one hacker.</b> A single hacker's x̄ and s² can be far from μ and σ² (sections 2.2 and 2.5), especially for small n. Unbiasedness is a statement about the average over repetitions — which is exactly what the m hackers provide.</li>
+  <li><b>The estimates are not independent of each other in general.</b> For skewed scores, hackers with a high x̄ also tend to have a high s² (Cov = μ<sub>3</sub>/n &gt; 0). Independence of x̄ and s² is a special property of normal data.</li>
+</ul>
+<h3>Why this is useful in inferential statistics</h3>
+<ul>
+  <li><b>We never see μ and σ²; we only see one sample.</b> Inference replaces them by x̄ and s². Knowing that the replacements are unbiased and consistent is what justifies the substitution: on average they are right, and with more data they converge.</li>
+  <li><b>The sampling distribution gives the error bars.</b> Var(x̄) = σ²/n, estimated by s²/n, gives the standard error s/√n of a single estimate. With the CLT (the histogram of x̄ in 2.5 is close to normal already at moderate n even for a skewed or bimodal score), this produces confidence intervals and tests — and section 2.6 shows they deliver the promised 95 % coverage once n is not tiny.</li>
+  <li><b>Unbiased s² is the ingredient of Student's t.</b> The t-interval and the t-test use s² with n − 1 degrees of freedom precisely because of the result above; using the biased σ̂² or the normal quantile undercovers at small n (2.6).</li>
+  <li><b>Welford makes all of this possible in a stream.</b> A security monitor that scores every attempt in real time can maintain x̄ and s² (and so an interval for the mean score) with O(1) memory per source and without the numerical breakdown of Σx² − n·x̄².</li>
+</ul>
+<h3>Effect of the number of systems n</h3>
+<ul>
+  <li><b>The variability of the sampling means falls like 1/n</b> (standard deviation like 1/√n), exactly σ²/n: slope −1 in 2.4. Four times as many systems halve the uncertainty on a hacker's mean score. This is the Law of Large Numbers of HW4 seen through the variance.</li>
+  <li><b>The variability of the sampling variances also falls like 1/n</b>, but with a constant set by the tails: Var(s²) ≈ σ⁴(κ − 1)/n. Heavy-tailed scores (the skewed distribution, κ ≈ 6) need several times more systems than light-tailed ones (uniform κ ≈ 1.8, bimodal κ ≈ 1.2) for the same relative precision on σ². Estimating a spread is always harder than estimating a centre.</li>
+  <li><b>Both sampling distributions become narrower and more normal</b> as n grows (2.5): s² is strongly right-skewed at small n and close to a bell at large n.</li>
+  <li><b>n and m do different jobs.</b> n controls how precise each hacker's estimate is; m controls how precisely we can measure the average and the spread of those estimates across hackers (the standard errors of the averages shrink like 1/√m). Bias is visible when it is larger than about 2·SE, which is why the (n−1)/n bias of SS/n is detectable at n = 2…50 but drowns in noise at n = 1 000.</li>
+</ul>
+
+<h2>4. Summary</h2>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th></th><th>Sampling mean x̄ = M<sub>n</sub></th><th>Sampling variance s² = SS<sub>n</sub>/(n−1)</th><th>Biased σ̂² = SS<sub>n</sub>/n</th></tr></thead>
+  <tbody>
+    <tr><td><b>Recurrence</b></td><td>M<sub>k</sub> = M<sub>k−1</sub> + δ/k</td><td colspan="2">SS<sub>k</sub> = SS<sub>k−1</sub> + δ·(x<sub>k</sub> − M<sub>k</sub>),  δ = x<sub>k</sub> − M<sub>k−1</sub></td></tr>
+    <tr><td><b>Expected value</b></td><td>μ — unbiased</td><td>σ² — unbiased</td><td>σ²(n−1)/n — biased low</td></tr>
+    <tr><td><b>Variance</b></td><td>σ²/n</td><td>(μ<sub>4</sub> − σ⁴(n−3)/(n−1))/n ≈ σ⁴(κ−1)/n</td><td>((n−1)/n)² · Var(s²)</td></tr>
+    <tr><td><b>Average over m hackers</b></td><td>≈ μ within σ/√(nm)</td><td>≈ σ² within √(Var(s²)/m)</td><td>visibly below σ² at small n</td></tr>
+    <tr><td><b>Role in inference</b></td><td>point estimate of μ</td><td colspan="2">standard error s/√n, t-intervals and tests (n−1 degrees of freedom)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer><a href="../hw4/">← HW4</a> · <a href="../">All homework</a> · Simulation: seeded xoshiro128** PRNG, Welford's recurrences, everything computed client-side.</footer>
+</main>
+
+<script src="../hw4/sim.js"></script>
+<script src="./sim.js"></script>
+<script src="../hw4/plot.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const H = window.HW5;
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = () => ({ s1: css("--s1"), s2: css("--s2"), ok: css("--ok"), bad: css("--bad"), fg: css("--fg"), fg2: css("--fg2"), muted: css("--muted") });
+const f = (v, d = 3) => Number.isFinite(v) ? (Math.abs(v) >= 1e5 ? v.toExponential(3) : Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("en") : +v.toFixed(d) + "") : "—";
+const g = (v, d = 4) => Number.isFinite(v) ? (v !== 0 && (Math.abs(v) < 1e-3 || Math.abs(v) >= 1e5) ? v.toExponential(2).replace("e-", "e−") : +v.toPrecision(d) + "") : "—";
+const nn = (n) => n.toLocaleString("en");
+let SIM = null, ST = null;
+
+// ======================= Exercise 1 =======================
+function parseData() { return $("#e1-data").value.split(/[\s,;]+/).filter(Boolean).map(Number).filter(Number.isFinite); }
+function ex1() {
+  const xs = parseData();
+  if (xs.length < 2) { $("#e1-table").innerHTML = ""; $("#e1-res").textContent = "Enter at least two numbers."; return; }
+  const w = H.welford();
+  let rows = "<thead><tr><th class='num'>k</th><th class='num'>x<sub>k</sub></th><th class='num'>δ = x<sub>k</sub> − M<sub>k−1</sub></th><th class='num'>M<sub>k</sub></th><th class='num'>x<sub>k</sub> − M<sub>k</sub></th><th class='num'>SS<sub>k</sub></th><th class='num'>s<sub>k</sub>²</th></tr></thead><tbody>";
+  xs.forEach((x) => {
+    const d = x - w.mean; w.push(x);
+    rows += `<tr><td class="num">${w.n}</td><td class="num">${g(x, 12)}</td><td class="num">${g(d, 6)}</td><td class="num">${g(w.mean, 10)}</td><td class="num">${g(x - w.mean, 6)}</td><td class="num">${g(w.ss, 6)}</td><td class="num">${w.n > 1 ? g(w.sampleVar, 6) : "—"}</td></tr>`;
+  });
+  $("#e1-table").innerHTML = rows + "</tbody>";
+  $("#e1-res").innerHTML = `n = ${xs.length} · mean = ${g(w.mean, 10)} · sample variance s² = ${g(w.sampleVar, 8)} · population variance = ${g(w.popVar, 8)}`;
+  // cancellation table on the data with its own mean removed, then shifted by c
+  const base = xs.map((x) => x - xs.reduce((a, b) => a + b, 0) / xs.length);
+  const ref = H.twoPassVar(base);
+  let t = "<thead><tr><th>Shift c</th><th class='num'>Textbook Σx² − (Σx)²/n</th><th class='num'>Two-pass</th><th class='num'>Welford</th></tr></thead><tbody>";
+  for (const c of [0, 1e4, 1e6, 1e8, 1e9, 1e12]) {
+    const ys = base.map((x) => x + c), wv = H.welford(); ys.forEach((y) => wv.push(y));
+    const cell = (v) => { const rel = Math.abs(v - ref) / Math.abs(ref || 1); return `<td class="num ${rel < 1e-6 ? "ok" : "bad"}">${g(v, 8)}</td>`; };
+    t += `<tr><td>${c ? "10" + String(Math.log10(c)).replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]) : "0"}</td>${cell(H.naiveVar(ys))}${cell(H.twoPassVar(ys))}${cell(wv.sampleVar)}</tr>`;
+  }
+  $("#e1-cancel").innerHTML = t + `</tbody><caption style="caption-side:bottom;text-align:left" class="note">True sample variance of these data: ${g(ref, 10)}. Green = within 10⁻⁶ relative error, red = wrong.</caption>`;
+}
+document.querySelectorAll("[data-pre]").forEach((b) => b.addEventListener("click", () => {
+  let v = b.dataset.pre;
+  if (v === "rand") { const r = H.rng((Math.random() * 1e9) >>> 0); v = Array.from({ length: 20 }, () => r() % 11).join(", "); }
+  $("#e1-data").value = v; ex1();
+}));
+$("#e1-run").addEventListener("click", ex1);
+
+// ======================= Exercise 2 =======================
+function dist() { const p = Math.min(0.95, Math.max(0.05, +$("#p").value || 0.3)); $("#p").value = p; return H.makeDist($("#dist").value, p); }
+function showDist() {
+  const d = dist(), col = C();
+  $("#p-lbl").style.display = d.key === "binom" ? "" : "none";
+  $("#story").textContent = d.story;
+  const edges = Array.from({ length: 12 }, (_, i) => i - 0.5);
+  plot($("#pmf"), { title: `Score distribution: ${d.name}`, caption: "P(score = k); dashed: μ, shaded: μ ± σ",
+    layers: [{ type: "band", x: [d.mu - d.sd, d.mu + d.sd], lo: [0, 0], hi: [1, 1], color: col.s1, opacity: 0.08 },
+      { type: "hist", edges, dens: d.pmf, color: col.s1, tip: (i) => `P(${i}) = ${d.pmf[i].toFixed(4)}` },
+      { type: "vline", x: d.mu, color: col.s2 }],
+    xMin: -0.5, xMax: 10.5, yMin: 0, yMax: Math.max(...d.pmf) * 1.12, xLabel: "score k", height: 200 });
+  const t = (l, v, o) => `<div class="tile"><div class="lbl">${l}</div><div class="v${o ? " o" : ""}">${v}</div></div>`;
+  $("#dist-tiles").innerHTML = t("mean μ", f(d.mu, 4)) + t("variance σ²", f(d.var, 4)) + t("std dev σ", f(d.sd, 4)) +
+    t("skewness μ₃/σ³", f(d.skew, 3), 1) + t("kurtosis κ = μ₄/σ⁴", f(d.kurt, 3), 1);
+  return d;
+}
+function run() {
+  const d = showDist();
+  const N = +$("#N").value, m = +$("#m").value, seed = Math.floor(+$("#seed").value) || 1;
+  $("#status").textContent = `Simulating ${nn(m)} hackers × ${nn(N)} systems…`;
+  $("#run").disabled = true;
+  setTimeout(() => {
+    const t0 = performance.now();
+    SIM = H.simulate({ dist: d, N, m, seed });
+    ST = SIM.cp.map((_, c) => H.analyse(SIM, c));
+    $("#status").textContent = `Done: ${nn(N * m)} scores in ${Math.round(performance.now() - t0)} ms. Checkpoints n = ${SIM.cp.join(", ")}.`;
+    $("#run").disabled = false;
+    $("#h-n").max = SIM.cp.length - 1;
+    const i10 = SIM.cp.indexOf(10); $("#h-n").value = i10 >= 0 ? i10 : 1;
+    renderAll();
+  }, 30);
+}
+function renderAll() { if (!SIM) return; runPaths(); averages(); variability(); hists(); coverage(); concl(); }
+
+// ---------- 2.2 running estimates ----------
+function runPaths() {
+  const d = SIM.dist, col = C(), gr = SIM.grid, P = SIM.paths;
+  const L = (key, band, truth) => {
+    const out = [{ type: "band", x: gr, lo: gr.map((k) => band(k)[0]), hi: gr.map((k) => band(k)[1]), color: col.s1, opacity: 0.13 }];
+    P.forEach((p, j) => { if (j) out.push({ type: "line", x: gr, y: Array.from(p[key]), color: col.s1, width: 1, opacity: 0.28 }); });
+    out.push({ type: "hline", y: truth, color: col.fg });
+    out.push({ type: "line", x: gr, y: Array.from(P[0][key]), color: col.s2, width: 2.2 });
+    return out;
+  };
+  const leg = [[`${P.length} hackers`, col.s1], ["hacker #1", col.s2], ["true value", col.fg, 1], ["±2 SE band", col.s1]];
+  plot($("#run-mean"), { title: "Running sampling mean Mₖ (Knuth)", caption: `true μ = ${f(d.mu, 4)}, band μ ± 2σ/√k`, legend: leg,
+    layers: L("mean", (k) => [d.mu - 2 * d.sd / Math.sqrt(k), d.mu + 2 * d.sd / Math.sqrt(k)], d.mu),
+    xLog: true, xMin: 1, yMin: 0, yMax: 10, xLabel: "systems attempted k (log)", yLabel: "Mₖ", height: 240 });
+  const vb = (k) => { const s = Math.sqrt(H.theory(d, Math.max(2, k)).varS2); return [d.var - 2 * s, d.var + 2 * s]; };
+  plot($("#run-var"), { title: "Running sampling variance sₖ² = SSₖ/(k−1) (Welford)", caption: `true σ² = ${f(d.var, 4)}, band σ² ± 2·√Var(sₖ²)`,
+    layers: L("s2", vb, d.var), xLog: true, xMin: 2, yMin: 0, yMax: d.var * 3, xLabel: "systems attempted k (log)", yLabel: "sₖ²", height: 240 });
+  const last = ST[ST.length - 1];
+  const inM = last.xbar.filter((v) => Math.abs(v - d.mu) <= 2 * Math.sqrt(last.th.varXbar)).length / SIM.m;
+  const inV = last.s2.filter((v) => Math.abs(v - d.var) <= 2 * Math.sqrt(last.th.varS2)).length / SIM.m;
+  $("#run-text").innerHTML = `Each hacker's estimates are noisy at the start and are pulled onto μ and σ² as k grows: both estimators are consistent. ` +
+    `At n = ${nn(SIM.N)}, ${(100 * inM).toFixed(1)} % of the ${nn(SIM.m)} hackers have x̄ inside μ ± 2 SE and ${(100 * inV).toFixed(1)} % have s² inside σ² ± 2 SE (normal theory: 95.4 %). ` +
+    `The variance paths start much wider (relative to their target) and settle more slowly than the mean paths.`;
+}
+
+// ---------- 2.3 averages ----------
+function averages() {
+  const d = SIM.dist, col = C(), ns = ST.map((r) => r.n);
+  plot($("#avg-mean"), { title: "Average of the m sampling means", caption: `band μ ± 2σ/√(nm): where the average should fall if x̄ is unbiased`,
+    legend: [["average of x̄", col.s1], ["μ", col.fg, 1]],
+    layers: [{ type: "band", x: ns, lo: ST.map((r) => d.mu - 2 * r.seXbar), hi: ST.map((r) => d.mu + 2 * r.seXbar), color: col.s1, opacity: 0.15 },
+      { type: "hline", y: d.mu, color: col.fg }, { type: "line", x: ns, y: ST.map((r) => r.avgXbar), color: col.s1, width: 1.2 },
+      { type: "points", x: ns, y: ST.map((r) => r.avgXbar), color: col.s1, tip: (i) => `n = ${ns[i]}: ${f(ST[i].avgXbar, 4)} (μ = ${f(d.mu, 4)})` }],
+    xLog: true, xLabel: "systems per hacker n (log)", height: 230 });
+  const lo = Math.min(...ST.map((r) => r.avgPop)) * 0.95;
+  plot($("#avg-var"), { title: "Average of the m sampling variances", caption: "SS/(n−1) stays on σ²; SS/n follows σ²(n−1)/n from below",
+    legend: [["avg of SS/(n−1)", col.s1], ["avg of SS/n", col.s2], ["σ²", col.fg, 1], ["σ²(n−1)/n", col.s2, 1]],
+    layers: [{ type: "band", x: ns, lo: ST.map((r) => d.var - 2 * r.seS2), hi: ST.map((r) => d.var + 2 * r.seS2), color: col.s1, opacity: 0.15 },
+      { type: "hline", y: d.var, color: col.fg },
+      { type: "line", x: ns, y: ST.map((r) => r.th.meanPop), color: col.s2, dash: "5 4", width: 1.4 },
+      { type: "line", x: ns, y: ST.map((r) => r.avgS2), color: col.s1, width: 1.2 },
+      { type: "points", x: ns, y: ST.map((r) => r.avgS2), color: col.s1, tip: (i) => `n = ${ns[i]}: ${f(ST[i].avgS2, 4)} (σ² = ${f(d.var, 4)})` },
+      { type: "points", x: ns, y: ST.map((r) => r.avgPop), color: col.s2, tip: (i) => `n = ${ns[i]}: ${f(ST[i].avgPop, 4)} (expected ${f(ST[i].th.meanPop, 4)})` }],
+    xLog: true, yMin: Math.min(lo, d.var / 2 * 0.95), xLabel: "systems per hacker n (log)", height: 230 });
+  const z = (a, b, se) => { const v = (a - b) / se; return `<td class="num ${Math.abs(v) < 2 ? "ok" : Math.abs(v) < 3 ? "" : "bad"}">${f(v, 2)}</td>`; };
+  let t = `<thead><tr><th class="num">n</th><th class="num">avg x̄</th><th class="num">μ</th><th class="num">z</th><th class="num">avg s²</th><th class="num">σ²</th><th class="num">z</th><th class="num">avg SS/n</th><th class="num">σ²(n−1)/n</th><th class="num">z vs σ²</th></tr></thead><tbody>`;
+  ST.forEach((r) => {
+    t += `<tr><td class="num">${nn(r.n)}</td><td class="num">${f(r.avgXbar, 4)}</td><td class="num">${f(d.mu, 4)}</td>${z(r.avgXbar, d.mu, r.seXbar)}` +
+      `<td class="num">${f(r.avgS2, 4)}</td><td class="num">${f(d.var, 4)}</td>${z(r.avgS2, d.var, r.seS2)}` +
+      `<td class="num">${f(r.avgPop, 4)}</td><td class="num">${f(r.th.meanPop, 4)}</td>${z(r.avgPop, d.var, r.seS2 * (r.n - 1) / r.n)}</tr>`;
+  });
+  $("#avg-table").innerHTML = t + "</tbody>";
+}
+
+// ---------- 2.4 variability ----------
+function variability() {
+  const col = C(), ns = ST.map((r) => r.n), d = SIM.dist;
+  const mk = (id, title, cap, emp, th, lbl) => plot($(id), { title, caption: cap,
+    legend: [["across hackers", col.s1], ["theory", col.s2]],
+    layers: [{ type: "line", x: ns, y: ns.map((n) => th(n)), color: col.s2, width: 1.8 },
+      { type: "points", x: ns, y: ST.map(emp), color: col.s1, tip: (i) => `n = ${ns[i]}: ${g(emp(ST[i]))} (theory ${g(th(ns[i]))})` }],
+    xLog: true, yLog: true, xLabel: "systems per hacker n (log)", yLabel: lbl, height: 230 });
+  mk("#v-xbar", "Var(x̄) across hackers", "theory σ²/n: slope −1", (r) => r.varXbar, (n) => d.var / n, "Var(x̄)");
+  mk("#v-s2", "Var(s²) across hackers", "theory (μ₄ − σ⁴(n−3)/(n−1))/n: slope −1 for large n", (r) => r.varS2, (n) => H.theory(d, n).varS2, "Var(s²)");
+  let t = `<thead><tr><th class="num">n</th><th class="num">Var(x̄)</th><th class="num">σ²/n</th><th class="num">SD(x̄)/μ</th><th class="num">Var(s²)</th><th class="num">theory</th><th class="num">SD(s²)/σ²</th><th class="num">corr(x̄, s²)</th><th class="num">theory</th></tr></thead><tbody>`;
+  ST.forEach((r) => {
+    const thc = r.th.cov / Math.sqrt(r.th.varXbar * r.th.varS2);
+    t += `<tr><td class="num">${nn(r.n)}</td><td class="num">${g(r.varXbar)}</td><td class="num">${g(r.th.varXbar)}</td><td class="num">${f(Math.sqrt(r.varXbar) / d.mu, 3)}</td>` +
+      `<td class="num">${g(r.varS2)}</td><td class="num">${g(r.th.varS2)}</td><td class="num">${f(Math.sqrt(r.varS2) / d.var, 3)}</td>` +
+      `<td class="num">${f(r.corr, 3)}</td><td class="num">${f(thc, 3)}</td></tr>`;
+  });
+  $("#v-table").innerHTML = t + `</tbody><caption style="caption-side:bottom;text-align:left" class="note">SD/target is the relative error of a single hacker's estimate. With m = ${nn(SIM.m)} hackers, an empirical variance itself carries a relative error of about √(2/m) ≈ ${(100 * Math.sqrt(2 / SIM.m)).toFixed(0)} % (more for heavy tails).</caption>`;
+}
+
+// ---------- 2.5 histograms ----------
+function normalCurve(mu, v, x0, x1) {
+  const x = [], y = [], s = Math.sqrt(v);
+  for (let i = 0; i <= 200; i++) { const t = x0 + ((x1 - x0) * i) / 200; x.push(t); y.push(Math.exp(-0.5 * ((t - mu) / s) ** 2) / (s * Math.sqrt(2 * Math.PI))); }
+  return { x, y };
+}
+function hists() {
+  const c = +$("#h-n").value, r = ST[c], n = r.n, d = SIM.dist, col = C();
+  $("#h-nlbl").textContent = nn(n);
+  const hx = H.hist(r.xbar, 44, 1 / n);
+  const nx = normalCurve(d.mu, r.th.varXbar, hx.edges[0], hx.edges[hx.edges.length - 1]);
+  plot($("#h-xbar"), { title: `Sampling mean x̄ at n = ${nn(n)}`, caption: `normal N(μ, σ²/n) in orange`,
+    layers: [{ type: "hist", ...hx, color: col.s1, opacity: 0.75 }, { type: "line", ...nx, color: col.s2, width: 2 }, { type: "vline", x: d.mu, color: col.fg }],
+    yMin: 0, xLabel: "x̄", height: 220 });
+  const hs = H.hist(r.s2, 32);
+  const ns = normalCurve(d.var, r.th.varS2, hs.edges[0], hs.edges[hs.edges.length - 1]);
+  plot($("#h-s2"), { title: `Sampling variance s² at n = ${nn(n)}`, caption: `normal N(σ², Var(s²)) in orange. With integer scores s² takes only a few distinct values at small n, hence the jagged bars`,
+    layers: [{ type: "hist", ...hs, color: col.s1, opacity: 0.75 }, { type: "line", ...ns, color: col.s2, width: 2 }, { type: "vline", x: d.var, color: col.fg }],
+    yMin: 0, xLabel: "s²", height: 220 });
+  const K = Math.min(SIM.m, 1500);
+  plot($("#scatter"), { title: `Each hacker's (x̄, s²) at n = ${nn(n)}`, caption: `first ${nn(K)} hackers; dashed: μ and σ². Sample correlation ${f(r.corr, 3)}, theory μ₃/n ÷ (SD·SD) = ${f(r.th.cov / Math.sqrt(r.th.varXbar * r.th.varS2), 3)}`,
+    layers: [{ type: "points", x: Array.from(r.xbar.slice(0, K)), y: Array.from(r.s2.slice(0, K)), color: col.s1, r: 2.2 },
+      { type: "vline", x: d.mu, color: col.fg }, { type: "hline", y: d.var, color: col.fg }],
+    xLabel: "x̄", yLabel: "s²", height: 260 });
+  const skew = (a, mean, sd) => { let s = 0; for (const v of a) s += ((v - mean) / sd) ** 3; return s / a.length; };
+  $("#h-text").innerHTML = `At n = ${nn(n)}: skewness of x̄ across hackers ${f(skew(r.xbar, r.avgXbar, Math.sqrt(r.varXbar)), 2)} (theory μ₃/(σ³√n) = ${f(d.skew / Math.sqrt(n), 2)}), ` +
+    `skewness of s² ${f(skew(r.s2, r.avgS2, Math.sqrt(r.varS2)), 2)}. Move the slider: x̄ is close to normal already at small n, s² needs a much larger n before its right tail disappears.`;
+}
+
+// ---------- 2.6 coverage ----------
+function coverage() {
+  const col = C(), ns = ST.map((r) => r.n);
+  plot($("#cov"), { title: "Empirical coverage of the 95 % interval for μ", caption: "fraction of hackers whose own interval x̄ ± q·s/√n contains μ",
+    legend: [["Student t quantile", col.s1], ["normal 1.96", col.s2], ["nominal 95 %", col.fg, 1]],
+    layers: [{ type: "hline", y: 0.95, color: col.fg },
+      { type: "line", x: ns, y: ST.map((r) => r.covT), color: col.s1, width: 1.4 }, { type: "points", x: ns, y: ST.map((r) => r.covT), color: col.s1, tip: (i) => `n = ${ns[i]}: ${(100 * ST[i].covT).toFixed(1)} %` },
+      { type: "line", x: ns, y: ST.map((r) => r.covZ), color: col.s2, width: 1.4 }, { type: "points", x: ns, y: ST.map((r) => r.covZ), color: col.s2, tip: (i) => `n = ${ns[i]}: ${(100 * ST[i].covZ).toFixed(1)} %` }],
+    xLog: true, yMax: 1, yFmt: (v) => Math.round(v * 100) + " %", xLabel: "systems per hacker n (log)", height: 230 });
+  const se = 100 * Math.sqrt(0.95 * 0.05 / SIM.m);
+  let t = `<thead><tr><th class="num">n</th><th class="num">t<sub>0.975, n−1</sub></th><th class="num">coverage (t)</th><th class="num">coverage (1.96)</th></tr></thead><tbody>`;
+  ST.forEach((r) => (t += `<tr><td class="num">${nn(r.n)}</td><td class="num">${f(r.t, 3)}</td><td class="num">${(100 * r.covT).toFixed(1)} %</td><td class="num">${(100 * r.covZ).toFixed(1)} %</td></tr>`));
+  $("#cov-table").innerHTML = t + `</tbody><caption style="caption-side:bottom;text-align:left" class="note">Monte Carlo error of a coverage estimate with m = ${nn(SIM.m)}: ± ${se.toFixed(1)} points (1 SE). With integer scores, s² = 0 is possible at very small n (all equal scores) and gives an empty interval.</caption>`;
+}
+
+// ---------- conclusions with the run's numbers ----------
+function concl() {
+  const d = SIM.dist, a = ST[0], i10 = ST.findIndex((r) => r.n === 10), b = ST[i10 >= 0 ? i10 : 1], z = ST[ST.length - 1];
+  const maxZ = (k) => Math.max(...ST.map((r) => Math.abs(k(r))));
+  $("#concl-num").innerHTML = `<b>This run</b> (${d.name}, μ = ${f(d.mu, 4)}, σ² = ${f(d.var, 4)}, m = ${nn(SIM.m)}): ` +
+    `across all n the largest |z| of the average x̄ against μ is ${f(maxZ((r) => (r.avgXbar - d.mu) / r.seXbar), 2)} and of the average s² against σ² is ${f(maxZ((r) => (r.avgS2 - d.var) / r.seS2), 2)} — consistent with no bias. ` +
+    `The average of SS/n is ${f(a.avgPop, 3)} at n = 2 and ${f(b.avgPop, 3)} at n = ${b.n} (predicted ${f(a.th.meanPop, 3)} and ${f(b.th.meanPop, 3)}). ` +
+    `From n = ${nn(a.n)} to n = ${nn(z.n)} the standard deviation of x̄ across hackers falls from ${f(Math.sqrt(a.varXbar), 3)} to ${f(Math.sqrt(z.varXbar), 4)} and that of s² from ${f(Math.sqrt(a.varS2), 3)} to ${f(Math.sqrt(z.varS2), 4)}.`;
+}
+
+$("#run").addEventListener("click", run);
+$("#reseed").addEventListener("click", () => { $("#seed").value = (Math.random() * 1e6) | 0; run(); });
+$("#dist").addEventListener("change", run);
+$("#p").addEventListener("change", run);
+$("#h-n").addEventListener("input", () => SIM && hists());
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { showDist(); renderAll(); });
+ex1(); run();
+</script>
+</body>
+</html>
