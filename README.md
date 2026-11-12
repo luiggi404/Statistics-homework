@@ -7,3 +7,4 @@
 - [HW3 — Two ciphers and the statistics of breaking them](https://luiggi404.github.io/Statistics-homework/hw3/)
 - [HW4 — The penetration score as a random walk](https://luiggi404.github.io/Statistics-homework/hw4/)
 - [HW5 — Welford's recurrences and the sampling mean and variance](https://luiggi404.github.io/Statistics-homework/hw5/)
+- [HW6 — Riemann vs Lebesgue integration, and the normal CDF](https://luiggi404.github.io/Statistics-homework/hw6/)
