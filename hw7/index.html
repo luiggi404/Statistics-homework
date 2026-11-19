@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HW7 · Statistical independence and the χ² test</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  :root { --c1:#2a78d6; --c2:#eb6834; --c3:#2f9e6e; --c4:#8a5cc7; --c5:#c99a1e; --c6:#7a7974; --c7:#d14d8b; --c8:#3aa7b8; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --c1:#3987e5; --c2:#d95926; --c3:#3fae7c; --c4:#9d73d6; --c5:#d4a835; --c6:#8f8e88; --c7:#de6a9f; --c8:#4bb8c9; } }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; margin:12px 0; }
+  .tile { border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--panel); }
+  .tile .lbl { font-size:.78rem; color:var(--fg2); }
+  .tile .v { font-size:1.3rem; font-weight:700; font-variant-numeric:tabular-nums; color:var(--s1); }
+  .tile .v.o { color:var(--s2); }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .seg button { border-radius:0; background:var(--bg); color:var(--fg); border:none; font-weight:500; padding:6px 14px; }
+  .seg button.on { background:var(--s1); color:#fff; font-weight:600; }
+  .formula { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:.9rem; background:var(--code); padding:10px 14px; border-radius:8px; overflow-x:auto; white-space:pre; line-height:1.7; margin:10px 0; }
+  .formula b { color:var(--s1); }
+  textarea { font: .85rem ui-monospace, Menlo, Consolas, monospace; width:100%; min-height:120px; color:var(--fg); background:var(--bg);
+    border:1px solid var(--line); border-radius:6px; padding:8px 10px; resize:vertical; }
+  .codegrid { display:grid; grid-template-columns:1fr; gap:12px; }
+  .codegrid pre { margin:0; }
+  .codegrid .lbl { font-size:.78rem; color:var(--fg2); margin:0 0 4px; }
+  pre code { background:none; padding:0; }
+  th { text-transform:none; letter-spacing:0; font-size:.82rem; }
+  table.ct td, table.ct th { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  table.ct th:first-child, table.ct td:first-child { text-align:left; }
+  table.ct tr.tot td, table.ct td.tot { font-weight:700; background:var(--panel); }
+  table.ct td .s { display:block; font-size:.75rem; color:var(--fg2); font-weight:400; }
+  table.ct thead th.grp { text-align:center; color:var(--fg); border-bottom:none; }
+  td.ok { color:var(--ok); font-weight:600; } td.bad { color:var(--bad); font-weight:600; }
+  .hide { display:none !important; }
+  .verdict { border-radius:10px; padding:14px 16px; margin:14px 0; border:1px solid var(--line); background:var(--panel); }
+  .verdict.dep { border-left:4px solid var(--s2); } .verdict.ind { border-left:4px solid var(--ok); }
+  .verdict p { margin:6px 0; }
+  .two { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
+  .lg { display:flex; gap:12px; flex-wrap:wrap; font-size:.8rem; color:var(--fg2); margin:4px 0 6px; }
+  .lg span::before { content:""; display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px; background:var(--c); }
+  #status, #perm-status, #cal-status { min-height:1.4em; }
+</style>
+</head>
+<body>
+<main>
+<p class="crumb"><a href="../">Statistics Homework</a> / HW7</p>
+<h1>HW7 — Statistical independence and Pearson's χ² test</h1>
+<p class="sub">Given a bivariate dataset of categorical observations (x<sub>k</sub>, f<sub>k</sub>), the page builds the contingency table by counting the records, derives joint, marginal and conditional frequencies, computes the counts expected if the two variables were independent, and measures the gap with the χ² statistic and its p-value. Then it asks what a "dependent" verdict does and does not say about cause and effect.</p>
+
+<div class="def"><b>What this page is about.</b> Two variables are <i>independent</i> when knowing the value of one tells you nothing about the other. In probability this is an exact property of a joint distribution. In statistics we only see a finite sample, where the property never holds exactly even if it holds in the population: the question becomes whether the departure we see is larger than sampling noise alone would produce. The contingency table organises the evidence, the expected counts describe the "nothing going on" world, and χ² measures how far the data are from it.</div>
+
+<!-- ======================================================================= -->
+<h2>1. Independence in probability and in statistics</h2>
+
+<h3>1.1 In probability</h3>
+<div class="def"><b>Definition (events).</b> Two events A and B in a probability space are <i>independent</i> if P(A ∩ B) = P(A)·P(B). When P(B) &gt; 0 this is equivalent to P(A | B) = P(A): learning that B happened does not change the probability of A.</div>
+<div class="def"><b>Definition (random variables).</b> Two discrete random variables X and F are independent if every pair of events they define is independent, i.e. their joint probability mass function factorises into the product of the marginals:
+<div class="formula">p(x, f) = P(X = x, F = f) = p<sub>X</sub>(x) · p<sub>F</sub>(f)        for <b>all</b> x and f</div>
+For continuous variables the same holds with densities, or in general with the CDFs: F<sub>X,F</sub>(x, f) = F<sub>X</sub>(x)·F<sub>F</sub>(f).</div>
+<p>Equivalent forms, each useful in a different place below:</p>
+<ul>
+  <li><b>Conditional = marginal:</b> P(F = f | X = x) = P(F = f) for every x with P(X = x) &gt; 0. All the conditional distributions of F given X are the same distribution, and it equals the marginal of F. The property is symmetric, so the same holds with the roles of X and F swapped.</li>
+  <li><b>Expectations factorise:</b> E[g(X)·h(F)] = E[g(X)]·E[h(F)] for all bounded functions g, h. In particular independent numeric variables are uncorrelated. The converse fails: zero correlation only rules out a <i>linear</i> relation (X uniform on {−1, 0, 1} and F = X² have Cov = 0 but F is a function of X).</li>
+  <li><b>Dependence</b> is simply the negation: there is at least one cell (x, f) where p(x, f) ≠ p<sub>X</sub>(x)·p<sub>F</sub>(f).</li>
+</ul>
+
+<h3>1.2 In statistics</h3>
+<div class="def"><b>Definition (contingency table).</b> For n observations of two categorical variables, X with r categories x<sub>1</sub>…x<sub>r</sub> and F with c categories f<sub>1</sub>…f<sub>c</sub>, the <i>contingency table</i> is the r × c table of absolute joint frequencies n<sub>ij</sub> = #{k : x<sub>k</sub> = x<sub>i</sub>, f<sub>k</sub> = f<sub>j</sub>}. Its row totals n<sub>i·</sub> and column totals n<sub>·j</sub> are the absolute marginal frequencies, and Σ n<sub>ij</sub> = n.</div>
+<div class="formula">relative joint        f<sub>ij</sub>      = n<sub>ij</sub> / n
+marginal              f<sub>i·</sub> = n<sub>i·</sub> / n         f<sub>·j</sub> = n<sub>·j</sub> / n
+conditional of F|X    f<sub>j|i</sub>    = n<sub>ij</sub> / n<sub>i·</sub>        (row profiles: each row sums to 1)
+conditional of X|F    f<sub>i|j</sub>    = n<sub>ij</sub> / n<sub>·j</sub>        (column profiles: each column sums to 1)</div>
+<div class="def"><b>Definition (statistical independence).</b> X and F are <i>statistically independent in the data</i> (perfect independence, in the descriptive sense) if the relative joint frequencies are the products of the marginal ones: f<sub>ij</sub> = f<sub>i·</sub>·f<sub>·j</sub> for all i, j. Equivalently all row profiles coincide (f<sub>j|i</sub> = f<sub>·j</sub>), or all column profiles coincide, or
+<div class="formula"><b>n<sub>ij</sub> = n<sub>i·</sub> · n<sub>·j</sub> / n  =:  ñ<sub>ij</sub></b>        (the <i>expected</i> or <i>theoretical</i> frequency)</div></div>
+<p>This is the probabilistic definition with probabilities replaced by relative frequencies. The two are tied by the law of large numbers: if the n records are i.i.d. draws from p(x, f), then f<sub>ij</sub> → p(x<sub>i</sub>, f<sub>j</sub>), f<sub>i·</sub> → p<sub>X</sub>(x<sub>i</sub>) and f<sub>·j</sub> → p<sub>F</sub>(f<sub>j</sub>). So under probabilistic independence f<sub>ij</sub> − f<sub>i·</sub>f<sub>·j</sub> → 0, but for finite n it is almost never exactly 0 (with integer counts, ñ<sub>ij</sub> is usually not even an integer). Descriptive independence is therefore a reference point rather than something we expect to observe, and we need a <i>measure</i> of how far the table is from it, and a <i>scale</i> telling us how far is too far to blame on chance.</p>
+
+<h3>1.3 The measure: Pearson's χ²</h3>
+<div class="def"><b>Definition.</b> The <i>chi-square statistic</i> sums the squared gaps between observed and expected counts, each scaled by the expected count:
+<div class="formula"><b>χ² = Σ<sub>i</sub> Σ<sub>j</sub> (n<sub>ij</sub> − ñ<sub>ij</sub>)² / ñ<sub>ij</sub></b>        χ² = 0  ⇔  descriptive independence</div></div>
+<p>Why divide by ñ<sub>ij</sub>: a cell count is roughly Poisson, so its variance is about its mean, and (n<sub>ij</sub> − ñ<sub>ij</sub>)/√ñ<sub>ij</sub> (the <i>Pearson residual</i>) is a gap measured in standard deviations. χ² is the sum of their squares.</p>
+<p><b>Its null distribution.</b> Under the hypothesis H<sub>0</sub>: "X and F are independent", and for large n, χ² is approximately distributed as a chi-square with</p>
+<div class="formula"><b>df = (r − 1)(c − 1)</b>  degrees of freedom</div>
+<p>There are r·c cells, but the expected counts were built to have the same margins as the data: r row totals and c column totals, of which r + c − 1 are independent (they share the grand total n). That leaves rc − (r + c − 1) = (r − 1)(c − 1) residuals free to vary. The <i>p-value</i> is P(χ²<sub>df</sub> ≥ observed χ²): the probability, if H<sub>0</sub> were true, of a table at least this far from independence. The approximation is reliable when the expected counts are not too small; the usual rule is ñ<sub>ij</sub> ≥ 5 in (nearly) all cells. Section 5.2 checks it without any approximation, by permutation.</p>
+<div class="def"><b>Definition (strength).</b> χ² grows with n for a fixed pattern of dependence, so it measures <i>evidence</i>, not <i>strength</i>. <i>Cramér's V</i> = √(χ² / (n·(min(r, c) − 1))) removes n and the table size: V = 0 under descriptive independence and V = 1 for a perfect association (in a square table: each category of X goes with a single category of F).</div>
+
+<!-- ======================================================================= -->
+<h2>2. The dataset (X, F)</h2>
+<p>Three real datasets and a synthetic one; you can also paste your own two columns. Real datasets are stored as published counts, <b>expanded into one record per observation and shuffled</b>, and the table below is then rebuilt from those records by the counting code: nothing downstream sees the original table.</p>
+<div class="panel">
+  <div class="controls">
+    <label>Dataset
+      <select id="ds">
+        <option value="ids" selected>Synthetic IDS log: service × verdict</option>
+        <option value="titanic">Titanic: class × survival</option>
+        <option value="haireye">Hair colour × eye colour</option>
+        <option value="ucb">UC Berkeley 1973: sex × admission</option>
+        <option value="custom">Your own data (paste CSV)</option>
+      </select></label>
+    <span id="ids-ctl" class="controls">
+      <label>Records n <select id="ids-n"><option>200</option><option>1000</option><option selected>5000</option><option>20000</option></select></label>
+      <label>Dependence λ <input id="ids-l" type="number" min="0" max="1" step="0.05" value="0.3"></label>
+      <label>Seed <input id="ids-seed" type="number" value="42"></label>
+      <button id="ids-new" class="ghost">New seed</button>
+    </span>
+    <label>Significance α
+      <select id="alpha"><option value="0.1">0.10</option><option value="0.05" selected>0.05</option><option value="0.01">0.01</option></select></label>
+  </div>
+  <div id="custom-ctl" class="hide" style="margin-top:12px">
+    <label style="display:block;font-size:.8rem;color:var(--fg2)">Two columns per line, comma / semicolon / tab separated
+      <textarea id="csv">protocol,alert
+SSH,yes
+HTTP,no
+HTTP,no
+SSH,yes
+DNS,no
+HTTP,yes
+SSH,no
+DNS,no
+HTTP,no
+SSH,yes
+DNS,no
+HTTP,no</textarea></label>
+    <div class="controls" style="margin-top:8px">
+      <label style="flex-direction:row;align-items:center;gap:6px"><input id="csv-h" type="checkbox" checked> first line is a header</label>
+      <button id="csv-go">Use this data</button>
+    </div>
+  </div>
+  <p id="status" class="note" style="margin-bottom:0"></p>
+</div>
+<p class="note" id="ds-about"></p>
+<div class="two">
+  <div>
+    <p class="note" style="margin:0 0 4px">The first raw records, exactly as the counting code receives them:</p>
+    <div class="scroll" style="max-height:260px"><table id="raw"></table></div>
+  </div>
+  <div>
+    <p class="note" style="margin:0 0 4px">The counting step (from <code>indep.js</code>): one pass over the records, one increment per record.</p>
+<pre><code>for (const [x, f] of records) {
+  if (!xi.has(x)) { xi.set(x, xs.length); xs.push(x); }
+  if (!fi.has(f)) { fi.set(f, fs.length); fs.push(f); }
+}
+const O = xs.map(() => fs.map(() => 0));
+for (const [x, f] of records)
+  O[xi.get(x)][fi.get(f)]++;</code></pre>
+  </div>
+</div>
+<p class="note">The synthetic IDS log is built to have a known answer. Each record is a connection: X is the service (HTTP, HTTPS, DNS, SSH, SMTP, FTP) and F the verdict of an intrusion-detection system (benign, suspicious, malicious). The verdict is drawn from P(F | X = x) = (1 − λ)·p<sub>F</sub> + λ·q<sub>x</sub>, a mix of a common distribution p<sub>F</sub> = (0.80, 0.15, 0.05) and a service-specific one q<sub>x</sub> (SSH and FTP are scanned and brute-forced far more often). At <b>λ = 0 the two variables are independent in probability</b>; any λ &gt; 0 makes them dependent, with strength growing in λ.</p>
+
+<!-- ======================================================================= -->
+<h2>3. Contingency table, marginal and conditional frequencies</h2>
+<h3>3.1 Absolute joint frequencies n<sub>ij</sub> with margins</h3>
+<div style="overflow-x:auto"><table id="t-abs" class="ct"></table></div>
+
+<h3>3.2 Relative and conditional frequencies</h3>
+<div class="seg" id="view">
+  <button data-v="joint" class="on">Joint f<sub>ij</sub></button>
+  <button data-v="row">F | X (row profiles)</button>
+  <button data-v="col">X | F (column profiles)</button>
+</div>
+<div style="overflow-x:auto"><table id="t-rel" class="ct"></table></div>
+<p class="note" id="rel-note"></p>
+
+<h3>3.3 Do the profiles coincide?</h3>
+<p>Independence means every row profile f(F | X = x<sub>i</sub>) equals the marginal f(F). Each bar below is one row profile; the last bar is the marginal. Under independence all bars would look the same.</p>
+<div id="profiles"></div>
+<p class="note" id="prof-note"></p>
+
+<!-- ======================================================================= -->
+<h2>4. Expected frequencies under independence</h2>
+<p>ñ<sub>ij</sub> = n<sub>i·</sub>·n<sub>·j</sub>/n is the table with the <b>same margins</b> as the data and <b>perfectly proportional rows</b>: the world where X carries no information about F. Each cell shows the observed count, the expected count (grey) and its contribution (n<sub>ij</sub> − ñ<sub>ij</sub>)²/ñ<sub>ij</sub> to χ². The background colour is the adjusted residual (n<sub>ij</sub> − ñ<sub>ij</sub>)/√(ñ<sub>ij</sub>(1 − f<sub>i·</sub>)(1 − f<sub>·j</sub>)), approximately N(0, 1) under H<sub>0</sub>: <span style="color:var(--s1);font-weight:600">blue</span> = more than expected, <span style="color:var(--s2);font-weight:600">orange</span> = fewer; |value| &gt; 2 is unusual, |value| &gt; 3 very unusual.</p>
+<div style="overflow-x:auto"><table id="t-exp" class="ct"></table></div>
+<p class="note" id="exp-note"></p>
+
+<!-- ======================================================================= -->
+<h2>5. The χ² statistic and the p-value</h2>
+<div class="tiles" id="tiles"></div>
+<div id="chi-plot"></div>
+<p class="note">The p-value is computed from the regularized upper incomplete gamma function Q(df/2, χ²/2), with a series for small arguments and a continued fraction for large ones; the critical value χ²<sub>1−α, df</sub> is found by bisection on the CDF. Both agree with <code>scipy.stats</code> to about 14 significant digits on the datasets here. The likelihood-ratio statistic G = 2 Σ n<sub>ij</sub> ln(n<sub>ij</sub>/ñ<sub>ij</sub>) has the same asymptotic distribution and is shown for comparison.</p>
+
+<h3>5.1 The computation in code</h3>
+<div class="codegrid">
+<div><p class="lbl">JavaScript (the function used on this page, simplified)</p>
+<pre><code>const E = rowTot.map(a =&gt; colTot.map(b =&gt; a * b / n));
+let chi2 = 0;
+for (let i = 0; i &lt; r; i++)
+  for (let j = 0; j &lt; c; j++)
+    chi2 += (O[i][j] - E[i][j]) ** 2 / E[i][j];
+const df = (r - 1) * (c - 1);
+const p  = gammaQ(df / 2, chi2 / 2);   // P(χ²_df ≥ chi2)
+const V  = Math.sqrt(chi2 / (n * (Math.min(r, c) - 1)));</code></pre></div>
+<div><p class="lbl">Python, from raw records, checked against SciPy</p>
+<pre><code>from collections import Counter
+from scipy.stats import chi2 as chi2_dist, chi2_contingency
+
+def independence(records):
+    xs = sorted({x for x, _ in records}); fs = sorted({f for _, f in records})
+    cnt = Counter(records)
+    O = [[cnt[(x, f)] for f in fs] for x in xs]
+    n = len(records)
+    rt = [sum(r) for r in O]; ct = [sum(c) for c in zip(*O)]
+    E = [[a * b / n for b in ct] for a in rt]
+    chi2 = sum((o - e) ** 2 / e for Or, Er in zip(O, E) for o, e in zip(Or, Er))
+    df = (len(xs) - 1) * (len(fs) - 1)
+    return O, E, chi2, df, chi2_dist.sf(chi2, df)
+
+# same numbers as chi2_contingency(O, correction=False)</code></pre></div>
+</div>
+
+<h3>5.2 A check without the χ² approximation: the permutation test</h3>
+<p>If X and F are independent, the pairing between the x column and the f column of the records is arbitrary. Shuffling the f column at random destroys any link while keeping both margins exactly as observed; each shuffle gives a table drawn from H<sub>0</sub>. Repeating it B times gives the <i>exact</i> null distribution of χ² for these margins, up to Monte Carlo error, with no large-sample assumption. The permutation p-value is (#{shuffled χ² ≥ observed} + 1)/(B + 1).</p>
+<div class="panel">
+  <div class="controls">
+    <label>Shuffles B <select id="perm-B"><option>500</option><option selected>2000</option><option>10000</option></select></label>
+    <button id="perm-go">Run permutation test</button>
+  </div>
+  <p id="perm-status" class="note" style="margin-bottom:0"></p>
+</div>
+<div id="perm-plot"></div>
+<p class="note" id="perm-note"></p>
+
+<h3>5.3 Does the test keep its promise?</h3>
+<p>A test at level α should reject a true H<sub>0</sub> about α of the time (type I error), and reject a false one as often as possible (power). With the synthetic log both cases can be generated: 1 000 independent logs of the chosen size at λ = 0 (independence holds) and at the chosen λ.</p>
+<div class="panel">
+  <div class="controls"><button id="cal-go">Simulate 1 000 + 1 000 logs</button></div>
+  <p id="cal-status" class="note" style="margin-bottom:0"></p>
+</div>
+<div style="overflow-x:auto"><table id="cal-table"></table></div>
+<div id="cal-plot"></div>
+
+<!-- ======================================================================= -->
+<h2>6. Interpretation: independent or dependent?</h2>
+<div id="verdict" class="verdict"></div>
+<h3>All built-in datasets at a glance</h3>
+<div style="overflow-x:auto"><table id="all-table"></table></div>
+<p class="note">For the synthetic log, the row uses the current n, λ and seed.</p>
+
+<!-- ======================================================================= -->
+<h2>7. Statistical association is not causation</h2>
+<p>A significant χ² establishes, with a controlled error rate, that X and F are <b>associated</b>: in the population, the distribution of F differs across values of X. It says nothing about <i>why</i>. The test is symmetric in X and F, so it cannot even tell the direction; and it is computed on a two-way table, so it cannot see any third variable. The usual ways an association arises without X causing F:</p>
+<ul>
+  <li><b>Confounding.</b> A third variable Z influences both X and F. Conditioning on Z can weaken, remove or even reverse the association (Simpson's paradox, below).</li>
+  <li><b>Reverse causation.</b> F causes X, not the other way round; the table looks the same.</li>
+  <li><b>Selection.</b> The way records entered the dataset depends on both variables (only alerts that were reviewed get logged, only survivors are interviewed), creating an association that does not exist in the population.</li>
+  <li><b>Chance.</b> At α = 0.05, one test in twenty on independent variables comes out "significant"; running many tests and reporting the significant ones guarantees false findings.</li>
+</ul>
+<p>Conversely, independence in a table does not prove the absence of a causal effect: two effects of opposite sign through different paths can cancel in the margins. Establishing causation needs a <b>design</b> (a randomised experiment, where X is assigned by a coin and therefore independent of every Z) or an explicit <b>causal model</b> that says which variables to condition on, plus subject-matter arguments (temporal order, mechanism, dose–response, consistency across studies).</p>
+
+<h3>7.1 Simpson's paradox: Berkeley admissions, 1973</h3>
+<p>Aggregated over departments, men were admitted at a visibly higher rate than women, and the χ² test is overwhelming. Split by department, the picture changes:</p>
+<div style="overflow-x:auto"><table id="ucb-table"></table></div>
+<p id="ucb-note"></p>
+<p>The confounder is the department. Women applied mostly to departments with low admission rates for everyone (C–F), men mostly to departments with high rates (A, B). Department is associated with sex (who applies where) and with admission (how selective it is), and this alone produces the aggregate association. The aggregate test is not wrong: sex and admission <i>are</i> associated among these applicants. What is wrong is reading it as "the admission process discriminates by sex", which is a causal statement the two-way table cannot support.</p>
+
+<h3>7.2 Reading the other datasets</h3>
+<ul>
+  <li><b>Titanic.</b> Class and survival are strongly associated. Plausible mechanisms are real (cabin location relative to the lifeboats, order of evacuation), but class is also associated with sex and age (the crew was almost entirely adult men, and "women and children first" was applied), so part of the class effect is a sex/age effect. The two-way table cannot separate them; a three-way analysis or a model with sex and age can, and only partially.</li>
+  <li><b>Hair × eye colour.</b> A clear association with no causal arrow between the two at all: both depend on how much melanin the body produces, which is governed by partly shared pigmentation genes. It is association through a common cause, and both variables are also tied to ancestry.</li>
+  <li><b>Synthetic IDS log.</b> Here we wrote the generating process, so we know the association is built in. Even so, "SSH causes malicious verdicts" is the wrong reading: attackers choose to target SSH and FTP (selection of targets by a third agent), and the IDS itself may flag those protocols more readily (a property of the measuring instrument, not of the traffic). Same table, three causal stories.</li>
+</ul>
+
+<!-- ======================================================================= -->
+<h2>8. Summary</h2>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th></th><th>Probability</th><th>Statistics (descriptive)</th><th>Statistics (inferential)</th></tr></thead>
+  <tbody>
+    <tr><td><b>Object</b></td><td>joint distribution p(x, f)</td><td>contingency table n<sub>ij</sub></td><td>sample from an unknown p(x, f)</td></tr>
+    <tr><td><b>Independence</b></td><td>p(x, f) = p<sub>X</sub>(x)·p<sub>F</sub>(f) ∀ x, f</td><td>n<sub>ij</sub> = n<sub>i·</sub>n<sub>·j</sub>/n ∀ i, j</td><td>H<sub>0</sub>: p(x, f) = p<sub>X</sub>(x)·p<sub>F</sub>(f)</td></tr>
+    <tr><td><b>Equivalent form</b></td><td>P(F | X = x) = P(F) ∀ x</td><td>all row profiles equal the marginal</td><td>—</td></tr>
+    <tr><td><b>Measure</b></td><td>—</td><td>χ² = Σ(n<sub>ij</sub> − ñ<sub>ij</sub>)²/ñ<sub>ij</sub>, Cramér's V</td><td>p-value = P(χ²<sub>(r−1)(c−1)</sub> ≥ χ²<sub>obs</sub>)</td></tr>
+    <tr><td><b>Conclusion</b></td><td>exact</td><td>χ² is almost never exactly 0; its size is judged against χ²<sub>df</sub></td><td>reject H<sub>0</sub> if p &lt; α: association, not causation</td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer><a href="../hw6/">← HW6</a> · <a href="../">All homework</a> · Contingency tables, χ², incomplete gamma, permutation test and seeded xoshiro128** PRNG, everything computed client-side.</footer>
+</main>
+
+<script src="../hw4/sim.js"></script>
+<script src="./indep.js"></script>
+<script src="./data.js"></script>
+<script src="../hw4/plot.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const H = window.HW7, D = window.HW7_DATA;
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const PAL = () => [1, 2, 3, 4, 5, 6, 7, 8].map((i) => css("--c" + i));
+const nn = (n) => n.toLocaleString("en");
+const f = (v, d = 3) => Number.isFinite(v) ? (+v.toFixed(d)).toLocaleString("en", { maximumFractionDigits: d }).replace("-", "−") : "—";
+const pct = (v, d = 1) => Number.isFinite(v) ? (v * 100).toFixed(d) + "%" : "—";
+const pv = (p) => !Number.isFinite(p) ? "—" : p === 0 ? "&lt; 1e−300" : p < 1e-4 ? p.toExponential(2).replace("e-", "e−") : p.toFixed(4);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let CUR = null, VIEW = "joint";
+
+// ---------------- data loading ----------------
+function load() {
+  const k = $("#ds").value;
+  $("#ids-ctl").classList.toggle("hide", k !== "ids");
+  $("#custom-ctl").classList.toggle("hide", k !== "custom");
+  let recs, names, rows, cols, about;
+  if (k === "ids") {
+    const n = +$("#ids-n").value, lam = Math.min(1, Math.max(0, +$("#ids-l").value || 0)), seed = +$("#ids-seed").value | 0;
+    recs = H.idsLog(n, lam, seed); names = ["Service", "IDS verdict"]; rows = H.IDS.services; cols = H.IDS.verdicts;
+    about = `Synthetic: ${nn(n)} connections, λ = ${lam}, seed ${seed}. ${lam === 0 ? "Independence holds in the generating model." : "Dependence is built into the generating model."}`;
+  } else if (k === "custom") {
+    const p = H.parseCSV($("#csv").value, $("#csv-h").checked);
+    recs = p.recs; names = p.names; about = "Your data.";
+  } else {
+    const d = D[k]; recs = H.expand(d.rows, d.cols, d.O); names = [d.X, d.F]; rows = d.rows; cols = d.cols; about = "Source: " + d.source;
+  }
+  if (recs.length < 2) { $("#status").textContent = "Need at least two records with two non-empty fields."; return; }
+  const t = H.tabulate(recs, rows, cols);
+  if (t.r < 2 || t.c < 2) { $("#status").textContent = `Each variable needs at least two categories (found ${t.r} for X and ${t.c} for F).`; return; }
+  if (t.r > 15 || t.c > 15) { $("#status").textContent = `Too many categories to display (${t.r} × ${t.c}); max 15 × 15.`; return; }
+  $("#status").textContent = `${nn(recs.length)} records read · ${t.r} categories of ${names[0]} × ${t.c} of ${names[1]} · table rebuilt from the records.`;
+  $("#ds-about").innerHTML = about;
+  CUR = { key: k, recs, names, t, fr: H.frequencies(t), s: H.chiSquare(t) };
+  renderAll();
+}
+
+function renderAll() {
+  raw(); absTable(); relTable(); profiles(); expTable(); tiles(); chiPlot(); verdict();
+  $("#perm-plot").innerHTML = ""; $("#perm-note").textContent = ""; $("#perm-status").textContent = "";
+  if (CUR.t.n <= 20000) perm();
+}
+
+// ---------------- section 2 ----------------
+function raw() {
+  const { recs, names } = CUR, m = Math.min(recs.length, 40);
+  let h = `<thead><tr><th class="num">k</th><th>${esc(names[0])} (x<sub>k</sub>)</th><th>${esc(names[1])} (f<sub>k</sub>)</th></tr></thead><tbody>`;
+  for (let i = 0; i < m; i++) h += `<tr><td class="num">${i + 1}</td><td>${esc(recs[i][0])}</td><td>${esc(recs[i][1])}</td></tr>`;
+  if (recs.length > m) h += `<tr><td class="num">…</td><td colspan="2" class="note">${nn(recs.length - m)} more records</td></tr>`;
+  $("#raw").innerHTML = h + "</tbody>";
+}
+
+// ---------------- section 3 ----------------
+function head(t, names, extra = "Total") {
+  return `<thead><tr><th>${esc(names[0])} \\ ${esc(names[1])}</th>${t.cols.map((c) => `<th>${esc(c)}</th>`).join("")}${extra ? `<th>${extra}</th>` : ""}</tr></thead>`;
+}
+function absTable() {
+  const { t, names, fr } = CUR;
+  let h = head(t, names, "n<sub>i·</sub>") + "<tbody>";
+  t.rows.forEach((x, i) => {
+    h += `<tr><td><b>${esc(x)}</b></td>${t.O[i].map((v) => `<td>${nn(v)}</td>`).join("")}<td class="tot">${nn(t.rowTot[i])}<span class="s">${pct(fr.fx[i])}</span></td></tr>`;
+  });
+  h += `<tr class="tot"><td>n<sub>·j</sub></td>${t.colTot.map((v, j) => `<td>${nn(v)}<span class="s">${pct(fr.ff[j])}</span></td>`).join("")}<td>${nn(t.n)}<span class="s">100%</span></td></tr>`;
+  $("#t-abs").innerHTML = h + "</tbody>";
+}
+function relTable() {
+  const { t, names, fr } = CUR;
+  let h, note;
+  if (VIEW === "joint") {
+    h = head(t, names, "f<sub>i·</sub>") + "<tbody>";
+    t.rows.forEach((x, i) => { h += `<tr><td><b>${esc(x)}</b></td>${fr.joint[i].map((v) => `<td>${f(v, 4)}</td>`).join("")}<td class="tot">${f(fr.fx[i], 4)}</td></tr>`; });
+    h += `<tr class="tot"><td>f<sub>·j</sub></td>${fr.ff.map((v) => `<td>${f(v, 4)}</td>`).join("")}<td>1</td></tr>`;
+    note = "Relative joint frequencies n<sub>ij</sub>/n; the margins are the marginal relative frequencies of X (right) and F (bottom). Under descriptive independence every cell would equal the product of its two margins.";
+  } else if (VIEW === "row") {
+    h = head(t, names, "Σ") + "<tbody>";
+    t.rows.forEach((x, i) => { h += `<tr><td><b>${esc(x)}</b></td>${fr.fGivenX[i].map((v, j) => `<td>${pct(v)}</td>`).join("")}<td class="tot">100%</td></tr>`; });
+    h += `<tr class="tot"><td>marginal f(F)</td>${fr.ff.map((v) => `<td>${pct(v)}</td>`).join("")}<td>100%</td></tr>`;
+    note = `Conditional distributions of ${esc(names[1])} given each value of ${esc(names[0])}: f(f<sub>j</sub> | x<sub>i</sub>) = n<sub>ij</sub>/n<sub>i·</sub>. Independence ⇔ every row equals the bottom row.`;
+  } else {
+    h = head(t, names, "marginal f(X)") + "<tbody>";
+    t.rows.forEach((x, i) => { h += `<tr><td><b>${esc(x)}</b></td>${fr.xGivenF[i].map((v) => `<td>${pct(v)}</td>`).join("")}<td class="tot">${pct(fr.fx[i])}</td></tr>`; });
+    h += `<tr class="tot"><td>Σ</td>${t.cols.map(() => "<td>100%</td>").join("")}<td>100%</td></tr>`;
+    note = `Conditional distributions of ${esc(names[0])} given each value of ${esc(names[1])}: f(x<sub>i</sub> | f<sub>j</sub>) = n<sub>ij</sub>/n<sub>·j</sub>. Independence ⇔ every column equals the right-hand column.`;
+  }
+  $("#t-rel").innerHTML = h + "</tbody>"; $("#rel-note").innerHTML = note;
+}
+function profiles() {
+  const { t, names, fr } = CUR, P = PAL();
+  const NS = "http://www.w3.org/2000/svg";
+  const rows = [...t.rows.map((x, i) => ({ lab: x, p: fr.fGivenX[i], n: t.rowTot[i] })), { lab: "All (marginal)", p: fr.ff, n: t.n, all: true }];
+  const W = 640, bh = 22, gap = 9, L = 118, R = 54, top = 4, H = top + rows.length * (bh + gap) + 6;
+  const box = $("#profiles"); box.innerHTML = ""; box.classList.add("chart");
+  const tt = document.createElement("p"); tt.className = "ttl"; tt.textContent = `Row profiles: distribution of ${names[1]} within each ${names[0]}`; box.appendChild(tt);
+  const lg = document.createElement("div"); lg.className = "lg";
+  t.cols.forEach((c, j) => { const s = document.createElement("span"); s.style.setProperty("--c", P[j % 8]); s.textContent = c; lg.appendChild(s); });
+  box.appendChild(lg);
+  const tip = document.createElement("div"); tip.className = "tip"; box.appendChild(tip);
+  const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", `0 0 ${W} ${H}`); box.appendChild(svg);
+  const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); svg.appendChild(e); return e; };
+  const pw = W - L - R;
+  // reference lines at the marginal cumulative proportions
+  let acc = 0;
+  fr.ff.slice(0, -1).forEach((v) => { acc += v; mk("line", { x1: L + acc * pw, x2: L + acc * pw, y1: top - 2, y2: H - 4, stroke: "var(--fg2)", "stroke-width": 1, "stroke-dasharray": "3 3", opacity: 0.7 }); });
+  rows.forEach((r, i) => {
+    const y = top + i * (bh + gap) + (r.all ? 4 : 0);
+    mk("text", { x: L - 8, y: y + bh / 2 + 4, "text-anchor": "end", "font-size": 11.5, fill: "var(--fg)", "font-weight": r.all ? 700 : 400 }).textContent = r.lab;
+    mk("text", { x: W - R + 6, y: y + bh / 2 + 4, "font-size": 10.5, fill: "var(--fg2)" }).textContent = "n=" + nn(r.n);
+    let x = L;
+    r.p.forEach((v, j) => {
+      const w = (Number.isFinite(v) ? v : 0) * pw;
+      const rect = mk("rect", { x: x + 0.5, y, width: Math.max(0, w - 1), height: bh, fill: P[j % 8], rx: 2 });
+      if (w > 34) { const tx = mk("text", { x: x + w / 2, y: y + bh / 2 + 4, "text-anchor": "middle", "font-size": 10.5, fill: "#fff", "font-weight": 600 }); tx.textContent = Math.round(v * 100) + "%"; tx.style.pointerEvents = "none"; }
+      rect.addEventListener("mousemove", (e) => { const b = box.getBoundingClientRect(); tip.textContent = `${r.lab} → ${t.cols[j]}: ${pct(v)}`; tip.style.opacity = 1; tip.style.left = Math.min(e.clientX - b.left + 12, b.width - tip.offsetWidth) + "px"; tip.style.top = e.clientY - b.top - 30 + "px"; });
+      rect.addEventListener("mouseleave", () => (tip.style.opacity = 0));
+      x += w;
+    });
+  });
+  // largest gap between a profile and the marginal (total variation distance)
+  const tv = t.rows.map((x, i) => [x, 0.5 * fr.fGivenX[i].reduce((a, v, j) => a + Math.abs(v - fr.ff[j]), 0)]).sort((a, b) => b[1] - a[1]);
+  $("#prof-note").innerHTML = `Dashed lines: the marginal profile. The row furthest from it is <b>${esc(tv[0][0])}</b> (total-variation distance ½Σ|f(f<sub>j</sub>|x) − f(f<sub>j</sub>)| = ${f(tv[0][1], 3)}), the closest is <b>${esc(tv[tv.length - 1][0])}</b> (${f(tv[tv.length - 1][1], 3)}). Whether these gaps are larger than noise is what χ² decides.`;
+}
+
+// ---------------- section 4 ----------------
+function expTable() {
+  const { t, names, s } = CUR;
+  const bg = (z) => { const a = Math.min(1, Math.abs(z) / 4) * 55; return `background:color-mix(in srgb, var(${z > 0 ? "--s1" : "--s2"}) ${a.toFixed(0)}%, transparent)`; };
+  let h = head(t, names, "n<sub>i·</sub>") + "<tbody>";
+  t.rows.forEach((x, i) => {
+    h += `<tr><td><b>${esc(x)}</b></td>` + t.cols.map((_, j) =>
+      `<td style="${bg(s.adj[i][j])}" title="adjusted residual ${f(s.adj[i][j], 2)}">${nn(t.O[i][j])}<span class="s">ñ = ${f(s.E[i][j], 2)}</span><span class="s">χ² += ${f(s.contrib[i][j], 2)} · z = ${f(s.adj[i][j], 2)}</span></td>`).join("") +
+      `<td class="tot">${nn(t.rowTot[i])}</td></tr>`;
+  });
+  h += `<tr class="tot"><td>n<sub>·j</sub></td>${t.colTot.map((v) => `<td>${nn(v)}</td>`).join("")}<td>${nn(t.n)}</td></tr>`;
+  $("#t-exp").innerHTML = h + "</tbody>";
+  const cells = [];
+  t.rows.forEach((x, i) => t.cols.forEach((c, j) => cells.push({ x, c, z: s.adj[i][j], q: s.contrib[i][j] })));
+  cells.sort((a, b) => b.q - a.q);
+  const top = cells.slice(0, Math.min(3, cells.length)).map((e) => `(${esc(e.x)}, ${esc(e.c)}) ${e.z > 0 ? "over" : "under"}-represented, z = ${f(e.z, 1)}, ${pct(e.q / s.chi2, 0)} of χ²`).join("; ");
+  const warn = s.small ? ` <b>${s.small} of ${s.cells} cells have ñ &lt; 5</b> (smallest ${f(s.minE, 2)}): the χ² approximation may be poor, rely on the permutation p-value in 5.2.` : ` All expected counts are ≥ 5 (smallest ${f(s.minE, 2)}), so the χ² approximation is appropriate.`;
+  $("#exp-note").innerHTML = `The margins of ñ coincide with the observed ones by construction, so the differences n<sub>ij</sub> − ñ<sub>ij</sub> sum to zero along every row and every column. Cells that drive χ² most: ${top}.` + warn;
+}
+
+// ---------------- section 5 ----------------
+const alpha = () => +$("#alpha").value;
+function tiles() {
+  const { t, s } = CUR, a = alpha(), crit = H.chi2Quantile(1 - a, s.df);
+  const T = [["χ² statistic", f(s.chi2, 3)], [`df = (${t.r}−1)(${t.c}−1)`, s.df], ["p-value", pv(s.p), s.p < a],
+    [`critical value (α = ${a})`, f(crit, 3)], ["Cramér's V", f(s.V, 3)], ["G statistic (p)", `${f(s.G, 2)} <span style="font-size:.8rem">(${pv(s.pG)})</span>`]];
+  $("#tiles").innerHTML = T.map(([l, v, o]) => `<div class="tile"><div class="lbl">${l}</div><div class="v${o ? " o" : ""}">${v}</div></div>`).join("");
+}
+function chiPlot() {
+  const { s } = CUR, k = s.df, a = alpha(), crit = H.chi2Quantile(1 - a, k);
+  const xmax = Math.max(crit * 1.5, k + 5 * Math.sqrt(2 * k), Math.min(s.chi2 * 1.08, crit * 6));
+  const X = [], Y = [], Xa = [], Ya = [], Z = [];
+  for (let i = 0; i <= 400; i++) { const x = (xmax * i) / 400 || 1e-6; const y = H.chi2Pdf(x, k); X.push(x); Y.push(y); if (x >= crit) { Xa.push(x); Ya.push(y); Z.push(0); } }
+  const ymax = Math.min(Math.max(...Y.filter(Number.isFinite)), k === 1 ? 1.2 : Infinity) * 1.08;
+  const off = s.chi2 > xmax;
+  const L = [
+    { type: "band", x: Xa, lo: Z, hi: Ya, color: css("--s2"), opacity: 0.3 },
+    { type: "line", x: X, y: Y, color: css("--s1"), width: 2 },
+    { type: "vline", x: crit, color: css("--s2") },
+  ];
+  if (!off) L.push({ type: "vline", x: s.chi2, color: css("--fg"), dash: "" });
+  plot($("#chi-plot"), {
+    title: `Null distribution χ²(${k}) and the observed statistic`,
+    caption: `shaded: rejection region at α = ${a} (χ² &gt; ${f(crit, 2)}); solid line: observed χ² = ${f(s.chi2, 2)}${off ? ` — off the chart to the right, ${f(s.chi2 / crit, 1)}× the critical value` : ""}`,
+    legend: [["χ² density", css("--s1")], ["critical value", css("--s2"), true], ["observed", css("--fg")]],
+    layers: L, xMin: 0, xMax: xmax, yMin: 0, yMax: ymax, xLabel: "χ²", yLabel: "density",
+  });
+}
+function perm() {
+  const B = +$("#perm-B").value, { s, t } = CUR;
+  $("#perm-status").textContent = "Shuffling…";
+  setTimeout(() => {
+    const t0 = performance.now(), P = H.permutation(t, B, 1234);
+    const ms = performance.now() - t0, st = Array.from(P.stats);
+    const k = s.df, hi = Math.max(H.chi2Quantile(0.999, k), ...st) * 1.02, nb = 50, w = hi / nb;
+    const edges = Array.from({ length: nb + 1 }, (_, i) => i * w), cnt = new Array(nb).fill(0);
+    st.forEach((v) => cnt[Math.min(nb - 1, Math.floor(v / w))]++);
+    const dens = cnt.map((c) => c / (B * w));
+    const X = [], Y = []; for (let i = 1; i <= 300; i++) { const x = (hi * i) / 300; X.push(x); Y.push(H.chi2Pdf(x, k)); }
+    const L = [{ type: "hist", edges, dens, color: css("--s1"), opacity: 0.55, tip: (i) => `${f(edges[i], 2)}–${f(edges[i + 1], 2)}: ${cnt[i]} shuffles` },
+      { type: "line", x: X, y: Y, color: css("--s2"), width: 2 }];
+    if (s.chi2 <= hi) L.push({ type: "vline", x: s.chi2, color: css("--fg"), dash: "" });
+    const ym = Math.max(...dens, ...Y.filter((v) => Number.isFinite(v) && v < 5)) * 1.08;
+    plot($("#perm-plot"), { title: `χ² of ${nn(B)} shuffled tables vs the χ²(${k}) density`, caption: s.chi2 > hi ? `observed χ² = ${f(s.chi2, 2)} lies far to the right of every shuffled value` : `solid line: observed χ² = ${f(s.chi2, 2)}`,
+      legend: [["shuffled (permutation null)", css("--s1")], [`χ²(${k}) density`, css("--s2")], ["observed", css("--fg")]],
+      layers: L, xMin: 0, xMax: hi, yMin: 0, yMax: ym, xLabel: "χ²", yLabel: "density" });
+    const ge = Math.round(P.p * (B + 1) - 1);
+    const mean = st.reduce((a, b) => a + b, 0) / B;
+    $("#perm-status").textContent = `${nn(B)} shuffles of ${nn(t.n)} records in ${Math.round(ms)} ms.`;
+    $("#perm-note").innerHTML = `${nn(ge)} of ${nn(B)} shuffled tables reached χ² ≥ ${f(s.chi2, 2)}: permutation p-value = ${pv(P.p)}${ge === 0 ? ` (the smallest value possible with B = ${nn(B)}; the true p is smaller)` : ""}, against ${pv(s.p)} from the χ² distribution. ` +
+      `The mean of the shuffled statistics is ${f(mean, 2)}, close to df = ${k} (the mean of χ²(${k})), and the histogram follows the density: the large-sample approximation is ${s.small ? "being tested in a case where it is doubtful (small expected counts) — compare the two p-values" : "accurate for these margins"}.`;
+  }, 20);
+}
+function calib() {
+  if (CUR.key !== "ids") { $("#cal-status").textContent = "Select the synthetic IDS log above: only there is the truth known."; return; }
+  const n = +$("#ids-n").value, lam = Math.min(1, Math.max(0, +$("#ids-l").value || 0)), a = alpha(), R = 1000;
+  $("#cal-status").textContent = "Simulating…";
+  setTimeout(() => {
+    const t0 = performance.now(), res = {};
+    for (const [nm, l] of [["H₀ true (λ = 0)", 0], [`H₀ false (λ = ${lam})`, lam]]) {
+      let rej = 0; const ps = [];
+      for (let r = 0; r < R; r++) {
+        const tb = H.tabulate(H.idsLog(n, l, 100000 + r * 7 + (l > 0 ? 1 : 0)), H.IDS.services, H.IDS.verdicts);
+        const p = H.chiSquare(tb).p; ps.push(p); if (p < a) rej++;
+      }
+      res[nm] = { rej, ps, l };
+    }
+    const se = Math.sqrt(a * (1 - a) / R);
+    let h = `<thead><tr><th>Scenario</th><th class="num">logs</th><th class="num">rejections at α = ${a}</th><th class="num">rate</th><th>reading</th></tr></thead><tbody>`;
+    Object.entries(res).forEach(([nm, r]) => {
+      const rate = r.rej / R;
+      const read = r.l === 0 ? (Math.abs(rate - a) < 3 * se ? `type I error ≈ α (±${f(3 * se, 3)})` : "type I error off from α") : lam === 0 ? "same as above (λ = 0)" : `power ${pct(rate, 1)}`;
+      h += `<tr><td>${nm}</td><td class="num">${nn(R)}</td><td class="num">${nn(r.rej)}</td><td class="num ${r.l === 0 ? "" : rate > 0.8 ? "ok" : ""}">${pct(rate, 1)}</td><td>${read}</td></tr>`;
+    });
+    $("#cal-table").innerHTML = h + "</tbody>";
+    const p0 = res[Object.keys(res)[0]].ps, nb = 20, cnt = new Array(nb).fill(0);
+    p0.forEach((p) => cnt[Math.min(nb - 1, Math.floor(p * nb))]++);
+    plot($("#cal-plot"), { title: "p-values of the 1 000 logs generated under independence", caption: "a valid test gives uniformly distributed p-values under H₀ (dashed: the uniform density)",
+      layers: [{ type: "hist", edges: Array.from({ length: nb + 1 }, (_, i) => i / nb), dens: cnt.map((c) => c / (R / nb)), color: css("--s1"), opacity: 0.6, tip: (i) => `${f(i / nb, 2)}–${f((i + 1) / nb, 2)}: ${cnt[i]}` },
+        { type: "hline", y: 1, color: css("--s2") }], xMin: 0, xMax: 1, yMin: 0, xLabel: "p-value", yLabel: "density" });
+    $("#cal-status").textContent = `n = ${nn(n)} records per log, ${Math.round(performance.now() - t0)} ms.`;
+  }, 20);
+}
+
+// ---------------- section 6 ----------------
+function strength(V, k) {   // Cohen's conventions for Cramér's V, adjusted for min(r, c) − 1
+  const s = [0.1, 0.3, 0.5].map((x) => x / Math.sqrt(k));
+  return V < s[0] ? "negligible" : V < s[1] ? "weak" : V < s[2] ? "moderate" : "strong";
+}
+function verdict() {
+  const { t, s, names, key } = CUR, a = alpha(), dep = s.p < a, k = Math.min(t.r, t.c) - 1;
+  const box = $("#verdict"); box.className = "verdict " + (dep ? "dep" : "ind");
+  const crit = H.chi2Quantile(1 - a, s.df);
+  const cells = [];
+  t.rows.forEach((x, i) => t.cols.forEach((c, j) => cells.push({ x, c, z: s.adj[i][j] })));
+  cells.sort((p, q) => Math.abs(q.z) - Math.abs(p.z));
+  const strong = cells.filter((e) => Math.abs(e.z) > 2).slice(0, 4);
+  const fr = CUR.fr;
+  let html = `<p class="result">${dep ? `<span class="no">Dependent</span>: reject H₀ at α = ${a}` : `<span class="yes">No evidence against independence</span> at α = ${a}`}</p>`;
+  html += `<p>χ² = ${f(s.chi2, 2)} with ${s.df} degrees of freedom ${dep ? "exceeds" : "does not exceed"} the critical value ${f(crit, 2)}; p = ${pv(s.p)}. `;
+  html += dep ? `If ${esc(names[0])} and ${esc(names[1])} were independent, a table this far from the expected counts would occur with probability ${pv(s.p)}. That is too unlikely to attribute to sampling noise, so we conclude that the two variables are <b>statistically dependent</b> (associated).</p>`
+    : `A departure from the expected counts at least this large would occur ${pct(s.p, 0)} of the time under independence, so the data are compatible with independence. This is <b>not proof</b> of independence: a weak dependence may simply be undetectable with n = ${nn(t.n)} (low power).</p>`;
+  html += `<p><b>Strength.</b> Cramér's V = ${f(s.V, 3)}: a <b>${strength(s.V, k)}</b> association by Cohen's conventions (for min(r, c) − 1 = ${k}). ${dep && strength(s.V, k) === "negligible" ? "Significant but negligible: with n this large even trivial differences are detected." : ""}</p>`;
+  if (strong.length) html += `<p><b>Where the dependence lives</b> (|adjusted residual| &gt; 2): ${strong.map((e) => `${esc(names[0])} = ${esc(e.x)} has ${e.z > 0 ? "more" : "fewer"} “${esc(e.c)}” than expected (z = ${f(e.z, 1)})`).join("; ")}.</p>`;
+  if (s.small) html += `<p><b>Caveat.</b> ${s.small} expected counts are below 5; check the permutation p-value in section 5.2 before trusting the χ² one.</p>`;
+  if (key === "ids") {
+    const lam = +$("#ids-l").value;
+    html += `<p><b>Against the truth.</b> This log was generated with λ = ${lam}, so the variables are ${lam === 0 ? "independent" : "dependent"} in the model: the verdict is ${(lam === 0) !== dep ? "<span class='yes'>correct</span>" : `<span class='no'>a ${lam === 0 ? "type I error (false alarm)" : "type II error (missed dependence)"}</span>`}.</p>`;
+  }
+  const notes = {
+    titanic: "Survival was 62% in first class, 41% in second, 25% in third and 24% among the crew.",
+    haireye: "Blond hair goes with blue eyes far more than independence predicts, and black hair with brown eyes.",
+    ucb: "Men were admitted at 44.5%, women at 30.4%. Section 7.1 shows this is not the whole story.",
+  };
+  if (notes[key]) html += `<p>${notes[key]}</p>`;
+  html += `<p><b>What it does not say.</b> The test establishes association only; it is symmetric in the two variables and blind to third variables (section 7).</p>`;
+  box.innerHTML = html;
+  allTable();
+}
+function allTable() {
+  const a = alpha();
+  const items = [["Synthetic IDS log", H.tabulate(H.idsLog(+$("#ids-n").value, Math.min(1, Math.max(0, +$("#ids-l").value || 0)), +$("#ids-seed").value | 0), H.IDS.services, H.IDS.verdicts)]];
+  for (const k of ["titanic", "haireye", "ucb"]) { const d = D[k]; items.push([d.name, H.tabulate(H.expand(d.rows, d.cols, d.O), d.rows, d.cols)]); }
+  let h = `<thead><tr><th>Dataset</th><th class="num">n</th><th class="num">r × c</th><th class="num">χ²</th><th class="num">df</th><th class="num">p-value</th><th class="num">Cramér's V</th><th>at α = ${a}</th></tr></thead><tbody>`;
+  items.forEach(([nm, t]) => {
+    const s = H.chiSquare(t), dep = s.p < a;
+    h += `<tr><td>${nm}</td><td class="num">${nn(t.n)}</td><td class="num">${t.r} × ${t.c}</td><td class="num">${f(s.chi2, 2)}</td><td class="num">${s.df}</td><td class="num">${pv(s.p)}</td><td class="num">${f(s.V, 3)}</td><td class="${dep ? "bad" : "ok"}">${dep ? "dependent" : "independent (not rejected)"}</td></tr>`;
+  });
+  $("#all-table").innerHTML = h + "</tbody>";
+}
+
+// ---------------- section 7 ----------------
+function ucb() {
+  const d = D.ucb, a = alpha();
+  let h = `<thead><tr><th>Department</th><th class="num">men applied</th><th class="num">men admitted</th><th class="num">women applied</th><th class="num">women admitted</th><th class="num">χ² (df 1)</th><th class="num">p-value</th><th>at α = ${a}</th></tr></thead><tbody>`;
+  const row = (nm, O, bold) => {
+    const t = H.margins({ rows: d.rows, cols: d.cols, O }), s = H.chiSquare(t);
+    const m = O[0][0] / t.rowTot[0], w = O[1][0] / t.rowTot[1], dep = s.p < a;
+    const b = (x) => (bold ? `<b>${x}</b>` : x);
+    return `<tr><td>${b(nm)}</td><td class="num">${nn(t.rowTot[0])}</td><td class="num">${pct(m)}</td><td class="num">${nn(t.rowTot[1])}</td><td class="num">${pct(w)}</td><td class="num">${f(s.chi2, 2)}</td><td class="num">${pv(s.p)}</td><td class="${dep ? "bad" : "ok"}">${dep ? (w > m ? "dependent: favours women" : "dependent: favours men") : "not rejected"}</td></tr>`;
+  };
+  for (const [k, O] of Object.entries(d.strata)) h += row(k, O);
+  h += row("All (aggregated)", d.O, true);
+  $("#ucb-table").innerHTML = h + "</tbody>";
+  const shareW = Object.values(d.strata).map((O) => O[1][0] + O[1][1]), shareM = Object.values(d.strata).map((O) => O[0][0] + O[0][1]);
+  const tw = shareW.reduce((x, y) => x + y), tm = shareM.reduce((x, y) => x + y);
+  const AB = (arr, tot) => pct((arr[0] + arr[1]) / tot, 0);
+  $("#ucb-note").innerHTML = `In four of six departments women were admitted at a <i>higher</i> rate than men, and the only department where sex and admission are significantly dependent (A) favours women. Within departments, independence is not rejected in five cases out of six. Yet ${AB(shareM, tm)} of men applied to A or B, the two departments admitting over 60% of applicants, against ${AB(shareW, tw)} of women.`;
+}
+
+// ---------------- wiring ----------------
+$("#ds").addEventListener("change", load);
+["#ids-n", "#ids-l", "#ids-seed"].forEach((s) => $(s).addEventListener("change", load));
+$("#ids-new").addEventListener("click", () => { $("#ids-seed").value = (Math.random() * 1e6) | 0; load(); });
+$("#csv-go").addEventListener("click", load);
+$("#alpha").addEventListener("change", () => { tiles(); chiPlot(); verdict(); ucb(); });
+$("#perm-go").addEventListener("click", perm);
+$("#cal-go").addEventListener("click", calib);
+document.querySelectorAll("#view button").forEach((b) => b.addEventListener("click", () => {
+  VIEW = b.dataset.v; document.querySelectorAll("#view button").forEach((x) => x.classList.toggle("on", x === b)); relTable();
+}));
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { profiles(); chiPlot(); });
+load(); ucb();
+</script>
+</body>
+</html>
